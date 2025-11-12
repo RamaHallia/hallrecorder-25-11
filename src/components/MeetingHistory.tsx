@@ -946,7 +946,7 @@ const previewBaseScale = 0.22;
           {paginatedMeetings.map((meeting, index) => (
             <div
               key={meeting.id}
-              className={`group relative bg-white border-2 border-gray-200 rounded-xl overflow-hidden transition-all duration-300 ease-out animate-fadeInUp hover:shadow-xl hover:-translate-y-1 ${
+              className={`group relative bg-white border-2 border-gray-200 rounded-xl overflow-hidden transition-all duration-200 ease-out animate-fadeInUp hover:shadow-xl ${
                 deletingId === meeting.id ? 'animate-slideOut opacity-0 scale-95' : ''
               } ${draggedMeetingId === meeting.id ? 'scale-95 opacity-70 shadow-lg border-coral-300' : 'hover:border-coral-300'}`}
               style={{
@@ -1098,9 +1098,9 @@ const previewBaseScale = 0.22;
           {paginatedMeetings.map((meeting, index) => (
         <div
           key={meeting.id}
-          className={`relative bg-gradient-to-br from-white to-orange-50/30 border-2 border-orange-100 rounded-xl md:rounded-2xl overflow-hidden transition-all duration-300 ease-out animate-fadeInUp ${
+          className={`relative bg-gradient-to-br from-white to-orange-50/30 border-2 border-orange-100 rounded-xl md:rounded-2xl overflow-hidden transition-all duration-200 ease-out animate-fadeInUp ${
             deletingId === meeting.id ? 'animate-slideOut opacity-0 scale-95' : ''
-          } ${draggedMeetingId === meeting.id ? 'scale-95 opacity-70 shadow-lg border-coral-200' : 'hover:border-coral-300 hover:shadow-xl hover:-translate-y-1'}`}
+          } ${draggedMeetingId === meeting.id ? 'scale-95 opacity-70 shadow-lg border-coral-200' : 'hover:border-coral-300 hover:shadow-xl'}`}
           style={{
             zIndex: draggedMeetingId === meeting.id ? 20 : undefined,
             cursor: draggedMeetingId === meeting.id ? 'grabbing' : 'grab',
