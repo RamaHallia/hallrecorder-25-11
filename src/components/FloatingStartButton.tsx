@@ -211,22 +211,58 @@ export const FloatingStartButton = ({ onStartRecording, isVisible }: FloatingSta
         </div>
       )}
       <button
-        className={`relative w-24 h-24 bg-gradient-to-br from-coral-500 via-coral-600 to-sunset-500 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 hover:scale-110 hover:rotate-12 shadow-glow-coral group ${
+        className={`relative w-28 h-28 bg-gradient-to-br from-coral-500 via-coral-600 to-sunset-500 rounded-full shadow-2xl flex items-center justify-center transition-all duration-500 hover:scale-125 hover:rotate-[360deg] shadow-glow-coral group ${
           isAnimating ? 'opacity-0' : 'opacity-100'
         }`}
         title="Démarrer un enregistrement"
+        style={{
+          boxShadow: '0 10px 40px rgba(249, 115, 22, 0.4), 0 0 80px rgba(249, 115, 22, 0.2), inset 0 -4px 12px rgba(0, 0, 0, 0.2)'
+        }}
       >
-        <div className="absolute inset-0 bg-coral-400 rounded-full opacity-20 animate-ping pointer-events-none" style={{ animationDuration: '2s' }}></div>
-        <div className="absolute inset-1 bg-coral-400 rounded-full opacity-30 animate-pulse pointer-events-none" style={{ animationDuration: '2s' }}></div>
-        <div className="absolute inset-0 bg-coral-400 rounded-full opacity-10 blur-xl pointer-events-none"></div>
-        <div className="absolute inset-3 bg-gradient-to-tr from-white/30 to-transparent rounded-full pointer-events-none"></div>
-        <div className="absolute inset-0 bg-white rounded-full opacity-0 group-hover:opacity-10 transition-opacity duration-300 pointer-events-none"></div>
-        <div className="relative">
-          <Mic className="w-10 h-10 text-white drop-shadow-lg" />
+        {/* Pulse animé extérieur multiple */}
+        <div className="absolute -inset-2 bg-coral-400 rounded-full opacity-40 animate-ping pointer-events-none" style={{ animationDuration: '2s' }}></div>
+        <div className="absolute -inset-4 bg-coral-400 rounded-full opacity-20 animate-ping pointer-events-none" style={{ animationDuration: '2.5s', animationDelay: '0.3s' }}></div>
+        <div className="absolute -inset-6 bg-coral-400 rounded-full opacity-10 animate-ping pointer-events-none" style={{ animationDuration: '3s', animationDelay: '0.6s' }}></div>
+
+        {/* Glow pulsant */}
+        <div className="absolute inset-1 bg-coral-400 rounded-full opacity-40 animate-pulse pointer-events-none" style={{ animationDuration: '1.5s' }}></div>
+
+        {/* Effet de brillance tournant */}
+        <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none">
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-full animate-shimmer"></div>
         </div>
-        <div className="absolute -top-14 left-1/2 -translate-x-1/2 glass border-2 border-coral-200 px-5 py-3 rounded-xl opacity-0 group-hover:opacity-100 transition-all duration-200 whitespace-nowrap pointer-events-none shadow-xl scale-95 group-hover:scale-100">
-          <span className="text-sm font-bold bg-gradient-to-r from-coral-600 to-sunset-600 bg-clip-text text-transparent">Démarrer</span>
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full w-0 h-0 border-l-[8px] border-r-[8px] border-t-[8px] border-l-transparent border-r-transparent border-t-white"></div>
+
+        {/* Cercles concentriques animés */}
+        <div className="absolute inset-2 border-4 border-white/20 rounded-full animate-spin-slow pointer-events-none"></div>
+        <div className="absolute inset-4 border-2 border-white/30 rounded-full animate-spin-reverse pointer-events-none"></div>
+
+        {/* Reflet 3D */}
+        <div className="absolute inset-3 bg-gradient-to-tr from-white/40 via-white/20 to-transparent rounded-full pointer-events-none"></div>
+
+        {/* Hover effect */}
+        <div className="absolute inset-0 bg-gradient-to-t from-transparent to-white/20 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+
+        {/* Icône avec animation */}
+        <div className="relative transform transition-transform duration-500 group-hover:scale-110">
+          <Mic className="w-12 h-12 text-white drop-shadow-2xl filter brightness-110" />
+          {/* Effet de "voix" sortant du micro */}
+          <div className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            <div className="w-2 h-2 bg-white rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+          </div>
+          <div className="absolute -right-4 -top-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            <div className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+          </div>
+          <div className="absolute -right-6 top-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            <div className="w-1 h-1 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+          </div>
+        </div>
+
+        {/* Tooltip amélioré */}
+        <div className="absolute -top-16 left-1/2 -translate-x-1/2 glass border-2 border-coral-200 px-6 py-3 rounded-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap pointer-events-none shadow-2xl scale-90 group-hover:scale-100">
+          <span className="text-base font-bold bg-gradient-to-r from-coral-600 via-sunset-600 to-coral-600 bg-clip-text text-transparent animate-gradient">
+            Démarrer l'enregistrement
+          </span>
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full w-0 h-0 border-l-[10px] border-r-[10px] border-t-[10px] border-l-transparent border-r-transparent border-t-white/90"></div>
         </div>
       </button>
     </div>
