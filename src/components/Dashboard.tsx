@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, Clock, FileText, Calendar, BarChart3, Crown, Zap, AlertCircle, Filter } from 'lucide-react';
+import { TrendingUp, Clock, FileText, Calendar, BarChart3, Crown, Zap, AlertCircle, RefreshCw } from 'lucide-react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -48,8 +48,7 @@ export function Dashboard() {
   });
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [draftStartDate, setDraftStartDate] = useState('');
-  const [draftEndDate, setDraftEndDate] = useState('');
+  const [periodFilter, setPeriodFilter] = useState<'today' | 'week' | 'year'>('today');
   const [appliedRange, setAppliedRange] = useState<DateRange>({});
 
   const loadStats = useCallback(async (range?: DateRange) => {
@@ -165,21 +164,37 @@ export function Dashboard() {
     loadStats(appliedRange);
   }, [appliedRange, loadStats]);
 
-  const handleApplyRange = () => {
-    if (draftStartDate && draftEndDate && draftStartDate > draftEndDate) {
-      alert('La date de début doit être antérieure à la date de fin.');
-      return;
+  const handlePeriodFilter = (period: 'today' | 'week' | 'year') => {
+    setPeriodFilter(period);
+    const now = new Date();
+    let start: Date;
+
+    switch (period) {
+      case 'today':
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      case 'week':
+        start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case 'year':
+        start = new Date(now.getFullYear(), 0, 1);
+        break;
     }
-    setAppliedRange({
-      start: draftStartDate || undefined,
-      end: draftEndDate || undefined,
-    });
+
+    const range = {
+      start: start.toISOString().split('T')[0],
+      end: now.toISOString().split('T')[0]
+    };
+
+    setAppliedRange(range);
   };
 
-  const handleResetRange = () => {
-    setDraftStartDate('');
-    setDraftEndDate('');
-    setAppliedRange({});
+  const handleRefresh = () => {
+    if (periodFilter) {
+      handlePeriodFilter(periodFilter);
+    } else {
+      setAppliedRange({});
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -228,53 +243,51 @@ export function Dashboard() {
     .reverse();
  
   return (
-    <div className="min-h-screen bg-gradient-to-br from-peach-50 via-white to-coral-50 p-4 md:p-8">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between animate-fadeInDown">
-          <div>
-            <h1 className="text-3xl font-bold text-cocoa-900 mb-2">Tableau de bord</h1>
-            <p className="text-cocoa-600">Vue d'ensemble de votre utilisation</p>
-          </div>
-          <div className="bg-white border-2 border-coral-200 rounded-2xl shadow-sm px-5 py-4 flex flex-col lg:flex-row lg:items-end gap-4 animate-fadeInLeft delay-100">
-            <div className="flex items-center gap-2 text-cocoa-600 font-semibold text-sm sm:min-w-[150px] self-center lg:self-end lg:pb-1">
-              <Filter className="w-4 h-4 text-coral-500" />
-              Filtrer par dates
-            </div>
-            <div className="flex flex-1 flex-col sm:flex-row sm:items-end gap-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-cocoa-500">Du</label>
-                <input
-                  type="date"
-                  value={draftStartDate}
-                  onChange={(e) => setDraftStartDate(e.target.value)}
-                  className="border border-coral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-coral-200 focus:border-coral-400"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-cocoa-500">Au</label>
-                <input
-                  type="date"
-                  value={draftEndDate}
-                  onChange={(e) => setDraftEndDate(e.target.value)}
-                  className="border border-coral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-coral-200 focus:border-coral-400"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 sm:ml-auto self-center lg:self-end">
+        {/* Header avec filtres */}
+        <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 animate-fadeInDown">
+          <h1 className="text-2xl font-bold text-gray-900">Tableau de bord</h1>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-white rounded-xl shadow-sm overflow-hidden">
               <button
-                onClick={handleApplyRange}
-                className="group relative px-4 py-2 bg-gradient-to-r from-coral-500 to-sunset-500 text-white text-sm font-semibold rounded-xl shadow hover:shadow-lg transition-all duration-300 hover:scale-105 overflow-hidden"
+                onClick={() => handlePeriodFilter('today')}
+                className={`px-4 py-2 text-sm font-medium transition-all duration-300 ${
+                  periodFilter === 'today'
+                    ? 'bg-gray-900 text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
               >
-                <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-                <span className="relative">Appliquer</span>
+                Aujourd'hui
               </button>
               <button
-                onClick={handleResetRange}
-                className="px-4 py-2 border-2 border-coral-200 text-cocoa-600 text-sm font-semibold rounded-xl hover:bg-coral-50 hover:border-coral-300 transition-all duration-300 hover:scale-105"
+                onClick={() => handlePeriodFilter('week')}
+                className={`px-4 py-2 text-sm font-medium transition-all duration-300 ${
+                  periodFilter === 'week'
+                    ? 'bg-gray-900 text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
               >
-                Réinitialiser
+                Cette semaine
+              </button>
+              <button
+                onClick={() => handlePeriodFilter('year')}
+                className={`px-4 py-2 text-sm font-medium transition-all duration-300 ${
+                  periodFilter === 'year'
+                    ? 'bg-gray-900 text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                Cette Année
               </button>
             </div>
+            <button
+              onClick={handleRefresh}
+              className="group flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-coral-500 to-sunset-500 text-white text-sm font-semibold rounded-xl shadow hover:shadow-lg transition-all duration-300 hover:scale-105"
+            >
+              <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+              Actualiser
+            </button>
           </div>
         </div>
 
@@ -368,91 +381,84 @@ export function Dashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="group relative bg-white rounded-2xl shadow-lg border-2 border-coral-200 p-6 hover:shadow-2xl hover:scale-105 transition-all duration-300 overflow-hidden animate-fadeInUp delay-200">
-            <div className="absolute inset-0 bg-gradient-to-br from-coral-50 to-sunset-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative flex items-center justify-between mb-4">
-              <div className="p-3 bg-gradient-to-br from-coral-100 to-coral-50 rounded-xl group-hover:shadow-lg transition-all duration-300">
-                <FileText className="w-6 h-6 text-coral-600" />
+        {/* Cartes statistiques */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {/* Total de réunions */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-md transition-all duration-300 animate-fadeInUp delay-100">
+            <div className="flex items-start justify-between mb-3">
+              <p className="text-sm font-medium text-gray-600">Total de réunions</p>
+              <div className="p-2 bg-blue-50 rounded-lg">
+                <FileText className="w-5 h-5 text-blue-600" />
               </div>
-              <TrendingUp className="w-5 h-5 text-emerald-500" />
             </div>
-            <div className="relative space-y-1">
-              <p className="text-sm font-medium text-cocoa-600">Total de réunions</p>
-              <p className="text-3xl font-bold bg-gradient-to-r from-coral-600 to-sunset-600 bg-clip-text text-transparent">{stats.totalMeetings}</p>
-              <p className="text-xs text-cocoa-500">Depuis le début</p>
-            </div>
+            <p className="text-3xl font-bold text-gray-900 mb-1">{stats.totalMinutes}min</p>
+            <p className="text-xs text-gray-500">Depuis le début</p>
           </div>
 
-          <div className="group relative bg-white rounded-2xl shadow-lg border-2 border-sunset-200 p-6 hover:shadow-2xl hover:scale-105 transition-all duration-300 overflow-hidden animate-fadeInUp delay-300">
-            <div className="absolute inset-0 bg-gradient-to-br from-sunset-50 to-orange-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative flex items-center justify-between mb-4">
-              <div className="p-3 bg-gradient-to-br from-sunset-100 to-sunset-50 rounded-xl group-hover:shadow-lg transition-all duration-300">
-                <Clock className="w-6 h-6 text-sunset-600" />
+          {/* Minutes utilisées */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-md transition-all duration-300 animate-fadeInUp delay-150">
+            <div className="flex items-start justify-between mb-3">
+              <p className="text-sm font-medium text-gray-600">Minutes utilisées</p>
+              <div className="p-2 bg-green-50 rounded-lg">
+                <Clock className="w-5 h-5 text-green-600" />
               </div>
-              <TrendingUp className="w-5 h-5 text-emerald-500" />
             </div>
-            <div className="relative space-y-1">
-              <p className="text-sm font-medium text-cocoa-600">Minutes utilisées</p>
-              <p className="text-3xl font-bold bg-gradient-to-r from-sunset-600 to-coral-600 bg-clip-text text-transparent">{stats.totalMinutes}</p>
-              <p className="text-xs text-cocoa-500">Depuis le début</p>
-            </div>
+            <p className="text-3xl font-bold text-gray-900 mb-1">{stats.periodMeetings}</p>
+            <p className="text-xs text-gray-500">Depuis le début</p>
           </div>
 
-          <div className="group relative bg-white rounded-2xl shadow-lg border-2 border-peach-300 p-6 hover:shadow-2xl hover:scale-105 transition-all duration-300 overflow-hidden animate-fadeInUp delay-400">
-            <div className="absolute inset-0 bg-gradient-to-br from-peach-50 to-coral-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative flex items-center justify-between mb-4">
-              <div className="p-3 bg-gradient-to-br from-peach-100 to-peach-50 rounded-xl group-hover:shadow-lg transition-all duration-300">
-                <Calendar className="w-6 h-6 text-coral-600" />
+          {/* Réunions période */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-md transition-all duration-300 animate-fadeInUp delay-200">
+            <div className="flex items-start justify-between mb-3">
+              <p className="text-sm font-medium text-gray-600">Réunions</p>
+              <div className="p-2 bg-red-50 rounded-lg">
+                <Calendar className="w-5 h-5 text-red-600" />
               </div>
-              <span className="text-xs font-medium text-coral-600 bg-coral-50 px-2 py-1 rounded-lg">{periodLabel}</span>
             </div>
-            <div className="relative space-y-1">
-              <p className="text-sm font-medium text-cocoa-600">Réunions</p>
-              <p className="text-3xl font-bold bg-gradient-to-r from-coral-600 to-peach-600 bg-clip-text text-transparent">{stats.periodMeetings}</p>
-              <p className="text-xs text-cocoa-500">{stats.periodMinutes} minute{stats.periodMinutes > 1 ? 's' : ''} sur la période</p>
-            </div>
+            <p className="text-3xl font-bold text-gray-900 mb-1">{stats.periodMeetings}</p>
+            <p className="text-xs text-gray-500">{stats.periodMinutes} minutes sur la période</p>
           </div>
 
-          <div className="group relative bg-white rounded-2xl shadow-lg border-2 border-coral-200 p-6 hover:shadow-2xl hover:scale-105 transition-all duration-300 overflow-hidden animate-fadeInUp delay-500">
-            <div className="absolute inset-0 bg-gradient-to-br from-coral-50 to-sunset-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative flex items-center justify-between mb-4">
-              <div className="p-3 bg-gradient-to-br from-coral-100 to-sunset-50 rounded-xl group-hover:shadow-lg transition-all duration-300">
-                <BarChart3 className="w-6 h-6 text-sunset-600" />
+          {/* Durée moyenne */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-md transition-all duration-300 animate-fadeInUp delay-250">
+            <div className="flex items-start justify-between mb-3">
+              <p className="text-sm font-medium text-gray-600">Durée moyenne</p>
+              <div className="p-2 bg-purple-50 rounded-lg">
+                <BarChart3 className="w-5 h-5 text-purple-600" />
               </div>
             </div>
-            <div className="relative space-y-1">
-              <p className="text-sm font-medium text-cocoa-600">Durée moyenne</p>
-              <p className="text-3xl font-bold bg-gradient-to-r from-sunset-600 to-coral-600 bg-clip-text text-transparent">{stats.averageDuration}</p>
-              <p className="text-xs text-cocoa-500">minutes par réunion</p>
-            </div>
+            <p className="text-3xl font-bold text-gray-900 mb-1">{stats.averageDuration}</p>
+            <p className="text-xs text-gray-500">minutes par réunion</p>
           </div>
         </div>
 
+        {/* Section inférieure */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-2xl shadow-lg border-2 border-coral-200 p-6 animate-fadeInLeft delay-600">
-            <h2 className="text-lg font-semibold text-cocoa-900 mb-4 flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-coral-600" />
+          {/* Activité récente */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 animate-fadeInLeft delay-300">
+            <h2 className="text-base font-semibold text-gray-900 mb-1">
               Activité récente (7 derniers jours)
             </h2>
+            <p className="text-2xl font-bold text-gray-900 mb-1">{stats.totalMinutes}min</p>
+            <p className="text-xs text-gray-500 mb-6">5 email filté + 10 réponses</p>
+
             {stats.recentActivity.length === 0 ? (
-              <p className="text-cocoa-500 text-center py-8">Aucune activité récente</p>
+              <p className="text-gray-400 text-center py-8">Aucune activité récente</p>
             ) : (
               <div className="space-y-3">
-                {stats.recentActivity.map((activity, index) => (
-                  <div key={index} className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-peach-50 to-coral-50 hover:from-coral-100 hover:to-sunset-100 transition-all border border-coral-200">
+                {stats.recentActivity.slice(0, 3).map((activity, index) => (
+                  <div key={index} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-coral-500 to-sunset-500 flex items-center justify-center shadow-md">
-                        <Calendar className="w-6 h-6 text-white" />
+                      <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                        <FileText className="w-5 h-5 text-gray-600" />
                       </div>
                       <div>
-                        <p className="font-semibold text-cocoa-900">{formatDate(activity.date)}</p>
-                        <p className="text-sm text-cocoa-600">{activity.meetings} réunion{activity.meetings > 1 ? 's' : ''}</p>
+                        <p className="font-medium text-gray-900 text-sm">{formatDate(activity.date)}</p>
+                        <p className="text-xs text-gray-500">{activity.meetings} réunion{activity.meetings > 1 ? 's' : ''}</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-xl text-coral-600">{activity.minutes}</p>
-                      <p className="text-xs text-cocoa-500">minutes</p>
+                      <p className="font-semibold text-sm text-orange-600">{activity.minutes} minutes</p>
                     </div>
                   </div>
                 ))}
@@ -460,60 +466,61 @@ export function Dashboard() {
             )}
           </div>
 
-          <div className="bg-white rounded-2xl shadow-lg border-2 border-coral-200 p-6">
-            <h2 className="text-lg font-semibold text-cocoa-900 mb-4 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-coral-600" />
+          {/* Statistiques d'utilisation */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 animate-fadeInRight delay-350">
+            <h2 className="text-base font-semibold text-gray-900 mb-1">
               Statistiques d'utilisation
             </h2>
-            <div className="space-y-4">
-              <div className="border-b border-coral-200 pb-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-cocoa-600">Minutes ce mois</span>
-                  <span className="text-sm font-bold text-coral-600">{subscription?.minutes_used_this_month || 0} / {subscription?.minutes_quota || 600} min</span>
-                </div>
-                <div className="w-full bg-coral-100 rounded-full h-3 shadow-inner">
-                  <div
-                    className="bg-gradient-to-r from-coral-500 to-sunset-500 h-3 rounded-full transition-all durée-500 shadow-sm"
-                    style={{ width: `${Math.min(((subscription?.minutes_used_this_month || 0) / (subscription?.minutes_quota || 600)) * 100, 100)}%` }}
-                  />
-                </div>
-                <p className="text-xs text-cocoa-500 mt-1">Facturation basée sur l'utilisation</p>
-              </div>
 
-              <div>
-                <p className="text-sm font-medium text-cocoa-600 mb-3">Activité (7 derniers jours)</p>
-                {usageChartData.length === 0 ? (
-                  <p className="text-xs text-cocoa-400">Aucune donnée récente</p>
-                ) : (
-                  <div className="h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={usageChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="minutesGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#F97316" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#F97316" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#fde68a" />
-                        <XAxis dataKey="date" stroke="#92400e" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis yAxisId="minutes" orientation="right" stroke="#92400e" fontSize={12} tickLine={false} axisLine={false} width={45} />
-                        <Tooltip
-                          contentStyle={{ borderRadius: '12px', borderColor: '#fed7aa', boxShadow: '0 6px 16px rgba(249,115,22,0.12)' }}
-                          labelStyle={{ color: '#92400e', fontWeight: 600 }}
-                          formatter={(value, name) => [name === 'minutes' ? `${value} min` : `${value} réunion${Number(value) > 1 ? 's' : ''}`, name === 'minutes' ? 'Minutes' : 'Réunions']}  />
-                        <Area
-                          type="monotone"
-                          dataKey="minutes"
-                          stroke="#F97316"
-                          strokeWidth={2.5}
-                          fill="url(#minutesGradient)"
-                          yAxisId="minutes"
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
+            <div className="mb-6">
+              <p className="text-xs text-gray-500 mb-2">Minutes ce mois</p>
+              <div className="flex items-baseline gap-2 mb-3">
+                <span className="text-2xl font-bold text-orange-600">{subscription?.minutes_used_this_month || 0}</span>
+                <span className="text-sm text-gray-500">/ {subscription?.minutes_quota || 600} min</span>
               </div>
+              <div className="w-full bg-gray-100 rounded-full h-2">
+                <div
+                  className="bg-gradient-to-r from-orange-500 to-orange-600 h-2 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(((subscription?.minutes_used_this_month || 0) / (subscription?.minutes_quota || 600)) * 100, 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-400 mt-2">Facturation basée sur l'utilisation</p>
+            </div>
+
+            <div>
+              {usageChartData.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-8">Aucune donnée récente</p>
+              ) : (
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={usageChartData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="minutesGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                      <XAxis dataKey="date" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={false} />
+                      <YAxis yAxisId="minutes" orientation="right" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={false} width={40} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
+                        labelStyle={{ color: '#374151', fontWeight: 600, fontSize: '12px' }}
+                        itemStyle={{ fontSize: '12px' }}
+                        formatter={(value, name) => [name === 'minutes' ? `${value} min` : `${value} réunion${Number(value) > 1 ? 's' : ''}`, name === 'minutes' ? 'Minutes' : 'Réunions']}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="minutes"
+                        stroke="#f97316"
+                        strokeWidth={2}
+                        fill="url(#minutesGradient)"
+                        yAxisId="minutes"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
           </div>
         </div>
