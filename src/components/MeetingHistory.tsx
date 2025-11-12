@@ -738,18 +738,22 @@ const previewBaseScale = 0.22;
         )}
       </div>
 
-    <div className={`bg-gradient-to-r from-[#fff9f5] via-[#fff3ed] to-[#ffe7db] border-2 border-[#ffd8ba] rounded-xl md:rounded-2xl p-4 md:p-5 sticky top-[120px] z-20 transition-shadow ${draggedMeetingId ? 'shadow-2xl shadow-coral-200/30' : 'shadow-inner shadow-orange-100/40'}`}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Tag className="w-5 h-5 text-coral-500" />
-          <h3 className="font-bold text-cocoa-800 text-base md:text-lg">Catégories</h3>
+    <div className={`relative bg-gradient-to-br from-white via-peach-50/50 to-coral-50/30 border-2 border-coral-200 rounded-xl md:rounded-2xl p-4 md:p-5 sticky top-[120px] z-20 transition-all duration-300 overflow-hidden animate-fadeInDown delay-100 ${draggedMeetingId ? 'shadow-2xl shadow-coral-500/30 scale-[1.02]' : 'shadow-lg'}`}>
+      <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-coral-100/20 pointer-events-none"></div>
+      <div className="relative flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-gradient-to-br from-coral-500 to-sunset-500 rounded-xl shadow-lg">
+            <Tag className="w-5 h-5 text-white" />
+          </div>
+          <h3 className="font-bold bg-gradient-to-r from-coral-600 to-sunset-600 bg-clip-text text-transparent text-base md:text-lg">Catégories</h3>
         </div>
         <button
           onClick={() => setShowManageCategories(true)}
-          className="flex items-center gap-2 text-sm font-semibold text-coral-600 hover:text-coral-700 transition-colors"
+          className="group relative flex items-center gap-2 text-sm font-semibold text-coral-600 hover:text-coral-700 transition-all duration-300 px-3 py-2 rounded-lg hover:bg-coral-50 hover:scale-105 overflow-hidden"
         >
-          <FolderPlus className="w-4 h-4" />
-          Gérer
+          <div className="absolute inset-0 bg-gradient-to-r from-coral-100/0 via-coral-100/50 to-coral-100/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
+          <FolderPlus className="relative w-4 h-4" />
+          <span className="relative">Gérer</span>
         </button>
       </div>
 
@@ -757,7 +761,7 @@ const previewBaseScale = 0.22;
         <div className="mb-3 text-sm text-red-600">{categoryError}</div>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="relative flex flex-wrap gap-2">
         <button
           onClick={() => setSelectedCategoryId('all')}
           draggable={Boolean(draggedMeetingId)}
@@ -773,7 +777,7 @@ const previewBaseScale = 0.22;
             e.preventDefault();
             handleCategoryDrop(null);
           }}
-          className={getCategoryChipClassName(dropHighlightCategoryId === 'all', selectedCategoryId === 'all', Boolean(draggedMeetingId))}
+          className={`${getCategoryChipClassName(dropHighlightCategoryId === 'all', selectedCategoryId === 'all', Boolean(draggedMeetingId))} transition-all duration-300 hover:scale-110 hover:shadow-lg`}
           style={getChipStyle(null, selectedCategoryId === 'all', dropHighlightCategoryId === 'all')}
         >
           Toutes
@@ -785,7 +789,7 @@ const previewBaseScale = 0.22;
         ) : categories.length === 0 ? (
           <span className="text-xs text-cocoa-500">Aucune catégorie pour le moment</span>
         ) : (
-          categories.map((category) => (
+          categories.map((category, index) => (
             <button
               key={category.id}
               onClick={() => setSelectedCategoryId(category.id)}
@@ -802,8 +806,11 @@ const previewBaseScale = 0.22;
                 e.preventDefault();
                 handleCategoryDrop(category.id);
               }}
-              className={getCategoryChipClassName(dropHighlightCategoryId === category.id, selectedCategoryId === category.id, Boolean(draggedMeetingId))}
-              style={getChipStyle(category, selectedCategoryId === category.id, dropHighlightCategoryId === category.id)}
+              className={`${getCategoryChipClassName(dropHighlightCategoryId === category.id, selectedCategoryId === category.id, Boolean(draggedMeetingId))} transition-all duration-300 hover:scale-110 hover:shadow-lg animate-fadeInRight`}
+              style={{
+                ...getChipStyle(category, selectedCategoryId === category.id, dropHighlightCategoryId === category.id),
+                animationDelay: `${(index + 1) * 50}ms`
+              }}
             >
               {category.name}
             </button>
@@ -813,9 +820,10 @@ const previewBaseScale = 0.22;
     </div>
 
       {draggedMeetingId && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[1200] max-w-[90vw] px-3">
-          <div className="bg-white/95 backdrop-blur-md border-2 border-coral-200 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-2 overflow-x-auto">
-            <span className="text-xs font-semibold text-cocoa-500 mr-2 whitespace-nowrap">Déposer dans :</span>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[1200] max-w-[90vw] px-3 animate-fadeInUp">
+          <div className="relative bg-gradient-to-br from-white via-peach-50 to-coral-50 backdrop-blur-md border-2 border-coral-300 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-2 overflow-x-auto">
+            <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-coral-100/30 pointer-events-none rounded-2xl"></div>
+            <span className="relative text-xs font-semibold bg-gradient-to-r from-coral-600 to-sunset-600 bg-clip-text text-transparent mr-2 whitespace-nowrap">Déposer dans :</span>
             <button
               onClick={() => handleCategoryDrop(null)}
               onDragOver={(e) => e.preventDefault()}
@@ -1125,12 +1133,15 @@ const previewBaseScale = 0.22;
       )}
 
     {showManageCategories && (
-      <div className="fixed inset-0 z-[1200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border-2 border-coral-200 overflow-hidden animate-scaleIn">
-          <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-coral-500 to-sunset-500 text-white">
-            <div className="flex items-center gap-2">
-              <Tag className="w-5 h-5" />
-              <h4 className="text-lg font-bold">Gestion des catégories</h4>
+      <div className="fixed inset-0 z-[1200] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+        <div className="relative bg-gradient-to-br from-white via-peach-50 to-coral-50 w-full max-w-lg rounded-2xl shadow-2xl border-2 border-coral-300 overflow-hidden animate-zoomIn">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-coral-100/30 pointer-events-none"></div>
+          <div className="relative flex items-center justify-between px-5 py-4 bg-gradient-to-r from-coral-500 via-sunset-500 to-coral-600 text-white shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+                <Tag className="w-5 h-5" />
+              </div>
+              <h4 className="text-lg font-bold drop-shadow-sm">Gestion des catégories</h4>
             </div>
             <button
               onClick={() => {
@@ -1138,15 +1149,15 @@ const previewBaseScale = 0.22;
                 setCategoryFormError(null);
                 setNewCategoryName('');
               }}
-              className="p-2 rounded-lg hover:bg-white/20 transition-colors"
+              className="p-2 rounded-lg hover:bg-white/20 transition-all duration-300 hover:scale-110 hover:rotate-90"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
           </div>
 
-          <div className="px-5 py-4 space-y-4">
+          <div className="relative px-5 py-4 space-y-4">
             <form onSubmit={handleCreateCategory} className="space-y-3">
-              <label className="block text-sm font-semibold text-cocoa-800">
+              <label className="block text-sm font-semibold bg-gradient-to-r from-coral-600 to-sunset-600 bg-clip-text text-transparent">
                 Nouvelle catégorie
               </label>
               <div className="flex flex-col sm:flex-row gap-2">
@@ -1158,7 +1169,7 @@ const previewBaseScale = 0.22;
                     if (categoryFormError) setCategoryFormError(null);
                   }}
                   placeholder="Nom de la catégorie"
-                  className="flex-1 px-4 py-2 border-2 border-orange-200 rounded-xl focus:outline-none focus:border-coral-400 focus:ring-2 focus:ring-coral-100"
+                  className="flex-1 px-4 py-2 border-2 border-orange-200 rounded-xl focus:outline-none focus:border-coral-500 focus:ring-4 focus:ring-coral-500/20 transition-all duration-300 hover:border-coral-300 bg-white"
                 />
                 <button
                   type="submit"
@@ -1170,13 +1181,13 @@ const previewBaseScale = 0.22;
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
-                {colorPalette.map((color) => (
+                {colorPalette.map((color, index) => (
                   <button
                     key={`new-color-${color}`}
                     type="button"
                     onClick={() => setNewCategoryColor(color)}
-                    className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-105 ${newCategoryColor === color ? 'border-coral-600 scale-110' : 'border-transparent'}`}
-                    style={{ background: color }}
+                    className={`w-9 h-9 rounded-full border-2 transition-all duration-300 hover:scale-125 shadow-md hover:shadow-lg animate-fadeIn ${newCategoryColor === color ? 'border-coral-600 scale-125 ring-4 ring-coral-500/30' : 'border-white/50'}`}
+                    style={{ background: color, animationDelay: `${index * 30}ms` }}
                     title={color}
                   />
                 ))}
@@ -1187,18 +1198,19 @@ const previewBaseScale = 0.22;
               )}
             </form>
 
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
               {isCategoriesLoading ? (
                 <div className="flex items-center gap-2 text-sm text-cocoa-500">
                   <Loader2 className="w-4 h-4 animate-spin" /> Chargement des catégories...
                 </div>
               ) : categories.length === 0 ? (
-                <p className="text-sm text-cocoa-500">Aucune catégorie créée pour le moment.</p>
+                <p className="text-sm text-cocoa-500 text-center py-4">Aucune catégorie créée pour le moment.</p>
               ) : (
-                categories.map((category) => (
+                categories.map((category, index) => (
                   <div
                     key={category.id}
-                    className="flex items-center justify-between px-4 py-3 border-2 border-orange-100 rounded-xl hover:border-coral-300 transition-colors"
+                    className="relative flex items-center justify-between px-4 py-3 border-2 border-orange-100 rounded-xl hover:border-coral-300 transition-all duration-300 hover:shadow-lg bg-white/50 backdrop-blur-sm animate-fadeInLeft"
+                    style={{ animationDelay: `${index * 50}ms` }}
                   >
                     <div>
                       <p className="font-semibold text-cocoa-800">{category.name}</p>
@@ -1211,7 +1223,7 @@ const previewBaseScale = 0.22;
                               key={`palette-${category.id}-${color}`}
                               type="button"
                               onClick={() => handleUpdateCategoryColor(category.id, color)}
-                              className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-105 ${category.color === color ? 'border-coral-600 scale-110' : 'border-transparent'}`}
+                              className={`w-7 h-7 rounded-full border-2 transition-all duration-300 hover:scale-125 shadow-sm hover:shadow-md ${category.color === color ? 'border-coral-600 scale-125 ring-4 ring-coral-500/30' : 'border-white/50'}`}
                               style={{ background: color }}
                               title={color}
                             />
@@ -1220,10 +1232,10 @@ const previewBaseScale = 0.22;
                     </div>
                     <button
                       onClick={() => handleDeleteCategory(category.id)}
-                      className="p-2 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-2 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-300 hover:scale-110 hover:shadow-md"
                       title="Supprimer la catégorie"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-5 h-5" />
                     </button>
                   </div>
                 ))
