@@ -266,7 +266,7 @@ export const FloatingRecordButton = ({
             <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 md:w-3 md:h-3 bg-white rounded-full animate-pulse shadow-lg mb-1 md:mb-2" />
             
             {/* Timer */}
-            <span className="font-mono font-bold text-white text-[11px] sm:text-xs md:text-sm">
+            <span className="font-mono font-bold text-white text-[11px] sm:text-xs md:text-sm tabular-nums">
               {formatTime(recordingTime)}
             </span>
 
