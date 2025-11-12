@@ -1,4 +1,4 @@
-import { Calendar, Clock, FileText, Trash2, Loader2, Search, X, Mail, Edit2, Check, ChevronLeft, ChevronRight, Send, PlusCircle, Tag, FolderPlus } from 'lucide-react';
+import { Calendar, Clock, FileText, Trash2, Loader2, Search, X, Mail, Edit2, Check, ChevronLeft, ChevronRight, Send, PlusCircle, Tag, FolderPlus, List, LayoutGrid } from 'lucide-react';
 import { Meeting, MeetingCategory } from '../lib/supabase';
 import { useState, useMemo, useEffect, useRef, useCallback, CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
@@ -17,6 +17,10 @@ interface MeetingHistoryProps {
 const ITEMS_PER_PAGE = 10;
 
 export const MeetingHistory = ({ meetings = [], onDelete, onView, onSendEmail, onUpdateMeetings, isLoading = false, userId }: MeetingHistoryProps) => {
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>(() => {
+    const saved = localStorage.getItem('meetingViewMode');
+    return (saved as 'list' | 'grid') || 'list';
+  });
   const [searchTitle, setSearchTitle] = useState('');
   const [searchDate, setSearchDate] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -663,24 +667,58 @@ const previewBaseScale = 0.22;
             <Search className="w-5 h-5 text-coral-500" />
             <h3 className="font-bold text-cocoa-800 text-base md:text-lg">Filtres de recherche</h3>
           </div>
-          <button
-            onClick={() => {
-              console.log('🔄 Rechargement manuel des réunions depuis l\'historique');
-              onUpdateMeetings();
-            }}
-            disabled={isLoading}
-            className="p-2 hover:bg-coral-50 rounded-lg transition-colors group disabled:opacity-50"
-            title="Rafraîchir la liste"
-          >
-            <svg 
-              className={`w-5 h-5 text-coral-600 transition-transform ${isLoading ? 'animate-spin' : 'group-hover:rotate-180'}`}
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24"
+          <div className="flex items-center gap-2">
+            {/* Toggle vue liste/grille */}
+            <div className="flex items-center bg-white border-2 border-coral-200 rounded-lg overflow-hidden">
+              <button
+                onClick={() => {
+                  setViewMode('list');
+                  localStorage.setItem('meetingViewMode', 'list');
+                }}
+                className={`p-2 transition-all duration-300 ${
+                  viewMode === 'list'
+                    ? 'bg-coral-500 text-white'
+                    : 'text-coral-600 hover:bg-coral-50'
+                }`}
+                title="Vue liste"
+              >
+                <List className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => {
+                  setViewMode('grid');
+                  localStorage.setItem('meetingViewMode', 'grid');
+                }}
+                className={`p-2 transition-all duration-300 ${
+                  viewMode === 'grid'
+                    ? 'bg-coral-500 text-white'
+                    : 'text-coral-600 hover:bg-coral-50'
+                }`}
+                title="Vue grille"
+              >
+                <LayoutGrid className="w-5 h-5" />
+              </button>
+            </div>
+
+            <button
+              onClick={() => {
+                console.log('🔄 Rechargement manuel des réunions depuis l\'historique');
+                onUpdateMeetings();
+              }}
+              disabled={isLoading}
+              className="p-2 hover:bg-coral-50 rounded-lg transition-colors group disabled:opacity-50"
+              title="Rafraîchir la liste"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
+              <svg
+                className={`w-5 h-5 text-coral-600 transition-transform ${isLoading ? 'animate-spin' : 'group-hover:rotate-180'}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
@@ -875,8 +913,148 @@ const previewBaseScale = 0.22;
           <p className="text-cocoa-600 text-base md:text-lg font-medium">Aucune réunion trouvée</p>
           <p className="text-cocoa-500 text-sm md:text-base mt-2">Essayez de modifier vos critères de recherche</p>
         </div>
+      ) : viewMode === 'grid' ? (
+        <>
+        {/* Vue grille */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
+          {paginatedMeetings.map((meeting, index) => (
+            <div
+              key={meeting.id}
+              className={`group relative bg-white border-2 border-gray-200 rounded-xl overflow-hidden transition-all duration-300 ease-out animate-fadeInUp hover:shadow-xl hover:-translate-y-1 ${
+                deletingId === meeting.id ? 'animate-slideOut opacity-0 scale-95' : ''
+              } ${draggedMeetingId === meeting.id ? 'scale-95 opacity-70 shadow-lg border-coral-300' : 'hover:border-coral-300'}`}
+              style={{
+                zIndex: draggedMeetingId === meeting.id ? 20 : undefined,
+                cursor: draggedMeetingId === meeting.id ? 'grabbing' : 'pointer',
+                animationDelay: `${index * 30}ms`
+              }}
+              draggable
+              onDragStart={(e) => handleDragStart(e, meeting)}
+              onDragEnd={handleDragEnd}
+              onClick={() => editingId !== meeting.id && onView(meeting)}
+            >
+              {/* Preview placeholder - zone grise avec icône */}
+              <div className="h-32 bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center border-b-2 border-gray-200 group-hover:from-coral-50 group-hover:to-peach-50 transition-all duration-300">
+                <FileText className="w-12 h-12 text-gray-300 group-hover:text-coral-400 transition-colors duration-300" />
+              </div>
+
+              {/* Contenu */}
+              <div className="p-4">
+                {/* Catégorie en haut si existe */}
+                {meeting.category && (
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full border mb-2"
+                    style={getCategoryBadgeStyle(meeting.category.color)}
+                  >
+                    <Tag className="w-3 h-3" />
+                    {meeting.category.name}
+                  </span>
+                )}
+
+                {/* Titre */}
+                {editingId === meeting.id ? (
+                  <input
+                    type="text"
+                    value={editedTitle}
+                    onChange={(e) => setEditedTitle(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveTitle(meeting.id);
+                      if (e.key === 'Escape') handleCancelEdit();
+                    }}
+                    className="w-full px-2 py-1 border-2 border-coral-300 rounded-lg font-semibold text-gray-900 text-sm focus:outline-none focus:border-coral-500 mb-2"
+                    autoFocus
+                  />
+                ) : (
+                  <h3 className="font-semibold text-gray-900 text-sm line-clamp-2 mb-2 min-h-[2.5rem]">
+                    {meeting.title}
+                    {sentMeetingIds.has(meeting.id) && (
+                      <span className="inline-flex items-center gap-1 ml-2 px-1.5 py-0.5 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
+                        <Send className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+                  </h3>
+                )}
+
+                {/* Date et durée */}
+                <div className="flex flex-col gap-1 mb-3">
+                  <span className="text-xs text-gray-600 font-medium">
+                    {formatDate(meeting.created_at)}
+                  </span>
+                  <div className="flex items-center gap-1 text-xs text-gray-600 font-medium">
+                    <Clock className="w-3 h-3 text-orange-500" />
+                    <span>{formatDuration(meeting.duration)}</span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-1 pt-2 border-t border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                  {editingId === meeting.id ? (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSaveTitle(meeting.id);
+                        }}
+                        className="p-1.5 text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors"
+                        title="Enregistrer"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCancelEdit();
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                        title="Annuler"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditTitle(meeting);
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Modifier"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSendEmail(meeting);
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors"
+                        title="Envoyer par email"
+                      >
+                        <Mail className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteClick(meeting.id);
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Supprimer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        </>
       ) : (
         <>
+        {/* Vue liste */}
         <div className="space-y-2 md:space-y-3">
           {paginatedMeetings.map((meeting, index) => (
         <div
