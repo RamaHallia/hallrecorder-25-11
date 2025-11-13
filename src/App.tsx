@@ -1664,8 +1664,8 @@ function App() {
                   <div className="absolute inset-0 bg-gradient-to-br from-coral-50/20 via-transparent to-sunset-50/20 pointer-events-none"></div>
                   <div className="relative flex flex-col items-center py-4 md:py-8">
                     <button
-                      onClick={handleStop}
-                      className="mb-6 md:mb-8 group transition-transform hover:scale-105 active:scale-95"
+                      onClick={handleStopRecordingRequest}
+                      className="mb-6 md:mb-8 group transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                       title="Cliquez pour arrêter l'enregistrement"
                     >
                       <div className="relative w-20 h-20 md:w-24 md:h-24">
