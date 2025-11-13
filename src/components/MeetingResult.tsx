@@ -764,7 +764,7 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
         }
       }}
     >
-      <div className="bg-white rounded-2xl md:rounded-3xl max-w-4xl w-full h-[95vh] md:h-[90vh] overflow-hidden shadow-2xl border-2 border-orange-100 flex flex-col">
+      <div className="bg-white rounded-2xl md:rounded-3xl max-w-4xl w-full max-h-[95vh] md:max-h-[90vh] overflow-hidden shadow-2xl border-2 border-orange-100 flex flex-col">
         <div className="border-b-2 border-orange-100">
           <div className="p-4 md:p-8">
             <div className="flex items-center justify-between mb-4 md:mb-6">
@@ -920,7 +920,7 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
                 <textarea
                   value={editedSummary}
                   onChange={(e) => setEditedSummary(e.target.value)}
-                  className="w-full min-h-[600px] p-6 border-2 border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-coral-500 focus:border-coral-500 text-cocoa-800 text-lg leading-relaxed"
+                  className="w-full min-h-[400px] p-6 border-2 border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-coral-500 focus:border-coral-500 text-cocoa-800 text-lg leading-relaxed"
                 />
               ) : (
                 <div className="prose prose-slate max-w-none">
