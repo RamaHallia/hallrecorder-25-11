@@ -2032,10 +2032,10 @@ function App() {
           ) : view === 'settings' ? (
             <Settings userId={user?.id || ''} />
           ) : view === 'contact' ? (
-            <div className="max-w-4xl mx-auto">
-              <ContactSupport 
-                userId={user?.id || ''} 
-                userEmail={user?.email || ''} 
+            <div className="max-w-4xl mx-auto h-full flex items-start py-4">
+              <ContactSupport
+                userId={user?.id || ''}
+                userEmail={user?.email || ''}
                 reloadTrigger={contactReloadTrigger}
               />
             </div>

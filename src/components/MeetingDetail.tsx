@@ -886,8 +886,8 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
 
   return (
     <>
-      <div className="bg-white rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden border-2 border-orange-100">
-        <div className="border-b-2 border-orange-100">
+      <div className="bg-white rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden border-2 border-orange-100 h-full flex flex-col">
+        <div className="border-b-2 border-orange-100 flex-shrink-0">
           <div className="p-4 md:p-8">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4">
               <button
@@ -1043,7 +1043,7 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
             </div>
           </div>
 
-          <div className="flex items-center gap-2 px-4 md:px-8 border-t-2 border-orange-100 bg-gradient-to-r from-orange-50/50 to-red-50/50 overflow-x-auto">
+          <div className="flex items-center gap-2 px-4 md:px-8 border-t-2 border-orange-100 bg-gradient-to-r from-orange-50/50 to-red-50/50 overflow-x-auto flex-shrink-0">
             <button
               onClick={() => setActiveTab('summary')}
               className={`px-4 md:px-8 py-3 md:py-4 text-sm md:text-base font-bold transition-all relative rounded-t-xl whitespace-nowrap ${
@@ -1086,7 +1086,7 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
           </div>
         </div>
 
-        <div className="p-10 min-h-[500px]">
+        <div className="p-10 flex-1 overflow-auto">
 
           {!isEditing && (meeting.participant_first_name || meeting.participant_last_name || meeting.participant_email || meeting.attachment_name) && (
             <div className="max-w-4xl mb-8">
