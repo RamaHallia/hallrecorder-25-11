@@ -4,26 +4,9 @@
 
 L'application supporte maintenant :
 - ✅ TVA automatique à 20%
-- ✅ Champ numéro de TVA **toujours visible** sur la page Stripe Checkout
+- ✅ Paiement entreprise avec numéro de TVA intracommunautaire
 - ✅ Apple Pay et Google Pay
-- ✅ Affichage des prix TTC avec détail HT
-
-## 🚀 Guide rapide
-
-### Ce que voit l'utilisateur :
-
-1. **Dans l'application** : Prix TTC affichés (39€ ou 49€) avec le prix HT en petit dessous
-2. **Sur la page Stripe Checkout** :
-   - Un champ "Numéro de TVA" est TOUJOURS disponible
-   - Les entreprises peuvent le remplir, les particuliers peuvent l'ignorer
-   - La TVA est calculée automatiquement
-   - Apple Pay et Google Pay sont disponibles
-
-### Comment ça fonctionne :
-
-- **Particulier** : Ne remplit pas le champ TVA → paie le prix TTC avec 20% de TVA
-- **Entreprise FR** : Remplit le numéro de TVA → paie le prix TTC avec 20% de TVA
-- **Entreprise UE** : Remplit le numéro de TVA intra-UE → peut bénéficier de l'autoliquidation (TVA 0%)
+- ✅ Affichage des prix HT/TTC
 
 ## Configuration requise dans Stripe
 
@@ -123,12 +106,13 @@ Pour que les factures s'affichent correctement avec la TVA :
 2. Lors du checkout, Stripe calcule automatiquement la TVA
 3. La facture affiche le montant HT, la TVA, et le total TTC
 
-### Page de paiement Stripe
+### Pour les entreprises
 
-1. Lors du checkout, Stripe calcule automatiquement la TVA
-2. **Un champ "Numéro de TVA" est TOUJOURS disponible** pour les entreprises
-3. Si l'utilisateur saisit un numéro de TVA valide et intra-UE, la TVA peut être à 0% (autoliquidation)
-4. La facture affiche toujours le montant HT, la TVA, et le total TTC
+1. L'utilisateur coche "Paiement entreprise"
+2. Les prix affichés passent en **HT**
+3. Lors du checkout, un champ pour saisir le numéro de TVA apparaît
+4. Stripe vérifie automatiquement le numéro de TVA
+5. Si le numéro est valide et intra-UE, la TVA peut être à 0% (autoliquidation)
 
 ## Calcul de la TVA
 
@@ -156,12 +140,10 @@ automatic_tax: {
   enabled: true,  // Active le calcul automatique de la TVA
 }
 tax_id_collection: {
-  enabled: true,  // TOUJOURS activé - champ numéro de TVA toujours disponible
+  enabled: true,  // Permet la saisie du numéro de TVA (si demandé)
 }
 billing_address_collection: 'required',  // Requis pour la TVA
 ```
-
-**Important** : Le champ de numéro de TVA est TOUJOURS affiché sur la page Stripe Checkout, peu importe si l'utilisateur est un particulier ou une entreprise. Cela simplifie l'expérience utilisateur.
 
 ## Test en mode Test
 
@@ -193,17 +175,16 @@ Pour tester le paiement entreprise, utilisez ces numéros :
 ### Test complet :
 
 1. **Test particulier** :
-   - Cliquer sur "S'abonner" sur un plan
-   - Vérifier que le prix affiché dans l'app est TTC (39€ ou 49€)
-   - Sur la page Stripe, ne PAS remplir le champ numéro de TVA
+   - Ne pas cocher "Paiement entreprise"
+   - Vérifier que le prix affiché est TTC (39€ ou 49€)
    - Effectuer un paiement test
    - Vérifier la facture : doit afficher HT + TVA + TTC
 
 2. **Test entreprise** :
-   - Cliquer sur "S'abonner" sur un plan
-   - Sur la page Stripe, remplir le champ "Numéro de TVA"
+   - Cocher "Paiement entreprise"
+   - Vérifier que le prix affiché est HT (32.50€ ou 40.83€)
    - Effectuer un paiement test avec un numéro de TVA
-   - Vérifier la facture : doit afficher le numéro de TVA et la TVA calculée (ou 0% si autoliquidation)
+   - Vérifier la facture : doit afficher le numéro de TVA
 
 3. **Test Apple Pay** :
    - Ouvrir sur Safari (Mac ou iPhone)
