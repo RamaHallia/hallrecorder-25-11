@@ -1345,7 +1345,7 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
                   value={editedNotes}
                   onChange={(e) => setEditedNotes(e.target.value)}
                   placeholder="Ajoutez vos notes ici..."
-                  className="w-full min-h-[150px] p-4 border-2 border-amber-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-cocoa-800 leading-relaxed bg-gradient-to-br from-amber-50 to-orange-50 resize-y"
+                  className="w-full min-h-[100px] p-4 border-2 border-amber-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-cocoa-800 leading-relaxed bg-gradient-to-br from-amber-50 to-orange-50 resize-y"
                 />
               </div>
 
