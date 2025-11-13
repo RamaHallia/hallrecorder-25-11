@@ -341,7 +341,7 @@ function App() {
       if (!state || !state.view) {
         // Essayer de lire depuis le hash si pas d'état
         const hash = window.location.hash.replace('#', '');
-        if (hash && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact'].includes(hash)) {
+        if (hash && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hash)) {
           console.log('🔄 Restauration depuis hash:', hash);
           setView(hash as any);
         } else if (hash === 'detail') {
@@ -1596,8 +1596,10 @@ function App() {
             </button>
             <button
               onClick={() => {
+                console.log('🔵 Clic sur Abonnement, view actuel:', view);
                 setView('subscription');
                 window.location.hash = 'subscription';
+                console.log('🔵 Après setView, nouveau hash:', window.location.hash);
               }}
               className={`flex-1 md:w-full flex items-center justify-center md:justify-start gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-3 rounded-xl font-semibold transition-all text-sm md:text-base whitespace-nowrap ${
                 view === 'subscription'
