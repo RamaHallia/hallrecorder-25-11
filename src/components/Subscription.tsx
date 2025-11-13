@@ -74,33 +74,52 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
   };
 
   const handleChangePlan = async () => {
-    if (!subscription) {
-      const { error } = await supabase
-        .from('user_subscriptions')
-        .insert({
-          user_id: userId,
-          plan_type: selectedPlan,
-          minutes_quota: selectedPlan === 'starter' ? 600 : null,
-          minutes_used_this_month: 0,
-        });
+    setIsProcessing(true);
+    setError(null);
 
-      if (!error) {
-        alert(`Votre abonnement ${selectedPlan === 'starter' ? 'Starter' : 'Illimité'} a été activé!`);
-        loadSubscription();
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Vous devez être connecté');
       }
-    } else {
-      const { error } = await supabase
-        .from('user_subscriptions')
-        .update({
-          plan_type: selectedPlan,
-          minutes_quota: selectedPlan === 'starter' ? 600 : null,
-        })
-        .eq('user_id', userId);
 
-      if (!error) {
-        alert(`Votre formule a été changée vers ${selectedPlan === 'starter' ? 'Starter' : 'Illimitée'}!`);
-        loadSubscription();
+      // Map plan types to Stripe Price IDs
+      const priceIds = {
+        starter: 'price_1SSyMI14zZqoQtSCb1gqGhke',
+        unlimited: 'price_1SSyNh14zZqoQtSCqPL9VwTj'
+      };
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stripe-checkout`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            price_id: priceIds[selectedPlan],
+            success_url: `${window.location.origin}/#subscription`,
+            cancel_url: `${window.location.origin}/#subscription`,
+            mode: 'subscription'
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Erreur lors de la création de la session de paiement');
       }
+
+      const { url } = await response.json();
+
+      if (url) {
+        window.location.href = url;
+      }
+    } catch (err: any) {
+      console.error('Error:', err);
+      setError(err.message || 'Une erreur est survenue. Veuillez réessayer.');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -336,20 +355,36 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
         {subscription && subscription.plan_type !== selectedPlan && (
           <button
             onClick={handleChangePlan}
-            className="group relative w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 overflow-hidden"
+            disabled={isProcessing}
+            className="group relative w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-            <span className="relative">Changer pour la formule {selectedPlan === 'starter' ? 'Starter (39€)' : 'Illimitée (49€)'}</span>
+            {isProcessing ? (
+              <span className="relative flex items-center justify-center gap-2">
+                <Loader className="w-5 h-5 animate-spin" />
+                Redirection...
+              </span>
+            ) : (
+              <span className="relative">Changer pour la formule {selectedPlan === 'starter' ? 'Starter (39€)' : 'Illimitée (49€)'}</span>
+            )}
           </button>
         )}
 
         {!subscription && (
           <button
             onClick={handleChangePlan}
-            className="group relative w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 overflow-hidden"
+            disabled={isProcessing}
+            className="group relative w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-            <span className="relative">Activer la formule {selectedPlan === 'starter' ? 'Starter (39€)' : 'Illimitée (49€)'}</span>
+            {isProcessing ? (
+              <span className="relative flex items-center justify-center gap-2">
+                <Loader className="w-5 h-5 animate-spin" />
+                Redirection...
+              </span>
+            ) : (
+              <span className="relative">Activer la formule {selectedPlan === 'starter' ? 'Starter (39€)' : 'Illimitée (49€)'}</span>
+            )}
           </button>
         )}
 

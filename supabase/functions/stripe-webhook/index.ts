@@ -152,17 +152,27 @@ async function syncCustomerFromStripe(customerId: string) {
         console.error('Error updating subscription status:', noSubError);
         throw new Error('Failed to update subscription status in database');
       }
+      return;
     }
 
     // assumes that a customer can only have a single subscription
     const subscription = subscriptions.data[0];
+    const priceId = subscription.items.data[0].price.id;
 
-    // store subscription state
+    // Map price IDs to plan types
+    const PRICE_ID_MAP: Record<string, 'starter' | 'unlimited'> = {
+      'price_1SSyMI14zZqoQtSCb1gqGhke': 'starter',
+      'price_1SSyNh14zZqoQtSCqPL9VwTj': 'unlimited',
+    };
+
+    const planType = PRICE_ID_MAP[priceId];
+
+    // store subscription state in stripe_subscriptions
     const { error: subError } = await supabase.from('stripe_subscriptions').upsert(
       {
         customer_id: customerId,
         subscription_id: subscription.id,
-        price_id: subscription.items.data[0].price.id,
+        price_id: priceId,
         current_period_start: subscription.current_period_start,
         current_period_end: subscription.current_period_end,
         cancel_at_period_end: subscription.cancel_at_period_end,
@@ -184,6 +194,53 @@ async function syncCustomerFromStripe(customerId: string) {
       throw new Error('Failed to sync subscription in database');
     }
     console.info(`Successfully synced subscription for customer: ${customerId}`);
+
+    // Get user_id from stripe_customers
+    const { data: customerData, error: customerError } = await supabase
+      .from('stripe_customers')
+      .select('user_id')
+      .eq('customer_id', customerId)
+      .maybeSingle();
+
+    if (customerError || !customerData) {
+      console.error('Error fetching user_id for customer:', customerError);
+      throw new Error('Failed to fetch user_id for customer');
+    }
+
+    const userId = customerData.user_id;
+    const isActive = subscription.status === 'active' || subscription.status === 'trialing';
+
+    // Update user_subscriptions table
+    if (planType) {
+      const billingCycleStart = new Date(subscription.current_period_start * 1000).toISOString();
+      const billingCycleEnd = new Date(subscription.current_period_end * 1000).toISOString();
+
+      const { error: userSubError } = await supabase.from('user_subscriptions').upsert(
+        {
+          user_id: userId,
+          plan_type: planType,
+          minutes_quota: planType === 'starter' ? 600 : null,
+          billing_cycle_start: billingCycleStart,
+          billing_cycle_end: billingCycleEnd,
+          is_active: isActive,
+          stripe_customer_id: customerId,
+          stripe_price_id: priceId,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: 'user_id',
+        },
+      );
+
+      if (userSubError) {
+        console.error('Error updating user_subscriptions:', userSubError);
+        throw new Error('Failed to update user_subscriptions in database');
+      }
+
+      console.info(`Successfully updated user_subscriptions for user: ${userId}, plan: ${planType}`);
+    } else {
+      console.warn(`Unknown price_id: ${priceId}, skipping user_subscriptions update`);
+    }
   } catch (error) {
     console.error(`Failed to sync subscription for customer ${customerId}:`, error);
     throw error;
