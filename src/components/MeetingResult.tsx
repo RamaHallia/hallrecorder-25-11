@@ -107,6 +107,8 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
   };
 
   const handleWordReplace = async (newWord: string, replaceAll: boolean, saveToDict: boolean) => {
+    console.log('🔄 Remplacement:', { selectedWord, newWord, replaceAll, saveToDict, activeTab });
+
     if (saveToDict) {
       const { error } = await supabase
         .from('custom_dictionary')
@@ -121,38 +123,49 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
 
       if (error) {
         console.error('Erreur lors de l\'enregistrement dans le dictionnaire:', error);
+      } else {
+        console.log('✅ Mot ajouté au dictionnaire personnalisé');
       }
     }
 
+    let updatedText = '';
     if (activeTab === 'summary') {
-      if (replaceAll) {
-        const regex = new RegExp(`\\b${selectedWord}\\b`, 'gi');
-        setEditedSummary(prev => prev.replace(regex, newWord));
-      } else {
-        const before = editedSummary.substring(0, wordPosition.start);
-        const after = editedSummary.substring(wordPosition.end);
-        setEditedSummary(before + newWord + after);
+      updatedText = replaceAll
+        ? editedSummary.replace(new RegExp(`\\b${selectedWord}\\b`, 'gi'), newWord)
+        : editedSummary.replace(selectedWord, newWord);
+
+      console.log('📝 Mise à jour du résumé');
+      setEditedSummary(updatedText);
+
+      if (meetingId) {
+        await supabase
+          .from('meetings')
+          .update({ summary: updatedText })
+          .eq('id', meetingId);
+
+        console.log('✅ Résumé sauvegardé dans la base de données');
       }
     } else if (activeTab === 'transcript') {
-      if (replaceAll) {
-        const regex = new RegExp(`\\b${selectedWord}\\b`, 'gi');
-        setEditedTranscript(prev => prev.replace(regex, newWord));
-      } else {
-        const before = editedTranscript.substring(0, wordPosition.start);
-        const after = editedTranscript.substring(wordPosition.end);
-        setEditedTranscript(before + newWord + after);
+      updatedText = replaceAll
+        ? editedTranscript.replace(new RegExp(`\\b${selectedWord}\\b`, 'gi'), newWord)
+        : editedTranscript.replace(selectedWord, newWord);
+
+      console.log('📝 Mise à jour de la transcription');
+      setEditedTranscript(updatedText);
+
+      if (meetingId) {
+        await supabase
+          .from('meetings')
+          .update({ display_transcript: updatedText })
+          .eq('id', meetingId);
+
+        console.log('✅ Transcription sauvegardée dans la base de données');
       }
     }
 
-    if (meetingId) {
-      await supabase
-        .from('meetings')
-        .update({
-          summary: activeTab === 'summary' ? editedSummary : undefined,
-          display_transcript: activeTab === 'transcript' ? editedTranscript : undefined,
-        })
-        .eq('id', meetingId);
-    }
+    setShowWordCorrection(false);
+    setSelectedWord('');
+    setWordPosition(null);
   };
 
   const loadSettings = useCallback(async () => {

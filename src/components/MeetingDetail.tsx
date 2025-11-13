@@ -136,13 +136,18 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
   };
 
   const handleWordReplace = async (newWord: string, replaceAll: boolean, saveToDict: boolean) => {
+    console.log('🔄 Remplacement:', { selectedWord, newWord, replaceAll, saveToDict, activeTab });
+
     if (saveToDict) {
       const { error } = await supabase
-        .from('user_custom_dictionary')
-        .insert({
+        .from('custom_dictionary')
+        .upsert({
           user_id: meeting.user_id,
-          original_word: selectedWord.toLowerCase(),
-          replacement_word: newWord.toLowerCase()
+          incorrect_word: selectedWord.toLowerCase(),
+          correct_word: newWord,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,incorrect_word',
         });
 
       if (error) {
@@ -152,21 +157,42 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
       }
     }
 
+    let updatedText = '';
     if (activeTab === 'summary') {
-      const updatedText = replaceAll
+      updatedText = replaceAll
         ? editedSummary.replace(new RegExp(`\\b${selectedWord}\\b`, 'gi'), newWord)
         : editedSummary.replace(selectedWord, newWord);
+
+      console.log('📝 Mise à jour du résumé');
       setEditedSummary(updatedText);
+
+      await supabase
+        .from('meetings')
+        .update({ summary: updatedText })
+        .eq('id', meeting.id);
+
+      console.log('✅ Résumé sauvegardé dans la base de données');
     } else if (activeTab === 'transcript') {
-      const updatedText = replaceAll
+      updatedText = replaceAll
         ? editedTranscript.replace(new RegExp(`\\b${selectedWord}\\b`, 'gi'), newWord)
         : editedTranscript.replace(selectedWord, newWord);
+
+      console.log('📝 Mise à jour de la transcription');
       setEditedTranscript(updatedText);
+
+      await supabase
+        .from('meetings')
+        .update({ display_transcript: updatedText })
+        .eq('id', meeting.id);
+
+      console.log('✅ Transcription sauvegardée dans la base de données');
     }
 
     setShowWordCorrection(false);
     setSelectedWord('');
     setWordPosition(null);
+
+    onUpdate();
   };
 
   // Timer pour mettre à jour le temps restant
