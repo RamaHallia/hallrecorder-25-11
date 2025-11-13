@@ -231,10 +231,17 @@ export function EmailComposer({
     // Ajouter tous les contacts du groupe aux destinataires
     const newRecipients = group.contacts.map(contact => ({ email: contact.email }));
     setRecipients(prev => {
-      // Éviter les doublons
-      const existingEmails = new Set(prev.map(r => r.email.toLowerCase()));
+      // Filtrer les champs vides et éviter les doublons
+      const filteredPrev = prev.filter(r => r.email.trim() !== '');
+      const existingEmails = new Set(filteredPrev.map(r => r.email.toLowerCase()));
       const uniqueNewRecipients = newRecipients.filter(r => !existingEmails.has(r.email.toLowerCase()));
-      return [...prev, ...uniqueNewRecipients];
+
+      // Si tout était vide, retourner uniquement les nouveaux contacts
+      if (filteredPrev.length === 0) {
+        return uniqueNewRecipients;
+      }
+
+      return [...filteredPrev, ...uniqueNewRecipients];
     });
     setShowGroupSelector(false);
   };
