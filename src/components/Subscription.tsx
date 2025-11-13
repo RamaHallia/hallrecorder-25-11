@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Crown, Calendar, CreditCard, Download, AlertCircle, CheckCircle, XCircle, Loader, ExternalLink, Zap } from 'lucide-react';
+import { Crown, Calendar, CreditCard, Download, AlertCircle, CheckCircle, XCircle, Loader, ExternalLink, Zap, FileText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface SubscriptionProps {
@@ -25,6 +25,20 @@ interface StripeSubscription {
   payment_method_last4: string | null;
 }
 
+interface Invoice {
+  id: string;
+  number: string;
+  amount: number;
+  currency: string;
+  status: string;
+  created: number;
+  invoice_pdf: string | null;
+  hosted_invoice_url: string | null;
+  description: string;
+  period_start: number;
+  period_end: number;
+}
+
 export const Subscription = ({ userId }: SubscriptionProps) => {
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [stripeSubscription, setStripeSubscription] = useState<StripeSubscription | null>(null);
@@ -32,9 +46,12 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<'starter' | 'unlimited'>('starter');
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [isLoadingInvoices, setIsLoadingInvoices] = useState(false);
 
   useEffect(() => {
     loadSubscription();
+    loadInvoices();
   }, [userId]);
 
   const loadSubscription = async () => {
@@ -70,6 +87,34 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
       setError('Erreur lors du chargement de l\'abonnement');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadInvoices = async () => {
+    setIsLoadingInvoices(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-invoices`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setInvoices(data.invoices || []);
+      }
+    } catch (err) {
+      console.error('Error loading invoices:', err);
+    } finally {
+      setIsLoadingInvoices(false);
     }
   };
 
@@ -506,6 +551,82 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
         </div>
       )}
 
+      {/* Section Factures */}
+      <div className="bg-white border-2 border-coral-200 rounded-2xl p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
+            <FileText className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h3 className="font-bold text-cocoa-800">Mes factures</h3>
+            <p className="text-sm text-cocoa-600">Téléchargez vos factures</p>
+          </div>
+        </div>
+
+        {isLoadingInvoices ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader className="w-6 h-6 animate-spin text-coral-500" />
+            <span className="ml-2 text-cocoa-600">Chargement des factures...</span>
+          </div>
+        ) : invoices.length > 0 ? (
+          <div className="space-y-3">
+            {invoices.map((invoice) => (
+              <div
+                key={invoice.id}
+                className="flex items-center justify-between p-4 bg-gradient-to-br from-peach-50 to-coral-50 rounded-xl border border-coral-200 hover:border-coral-300 transition-all"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="font-semibold text-cocoa-900">Facture {invoice.number}</p>
+                    {invoice.status === 'paid' && (
+                      <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">
+                        Payée
+                      </span>
+                    )}
+                    {invoice.status === 'open' && (
+                      <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded-full font-medium">
+                        En attente
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-cocoa-600">
+                    {new Date(invoice.created * 1000).toLocaleDateString('fr-FR', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric'
+                    })}
+                  </p>
+                  <p className="text-sm text-cocoa-500">{invoice.description}</p>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <p className="text-xl font-bold text-cocoa-900">
+                      {invoice.amount.toFixed(2)} {invoice.currency}
+                    </p>
+                  </div>
+                  {invoice.invoice_pdf && (
+                    <a
+                      href={invoice.invoice_pdf}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-lg font-semibold hover:shadow-lg transition-all"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>PDF</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-cocoa-500">
+            <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">Aucune facture disponible</p>
+          </div>
+        )}
+      </div>
+
       <div className="bg-gradient-to-r from-coral-50 to-sunset-50 border-2 border-coral-200 rounded-2xl p-6">
         <h3 className="font-bold text-cocoa-800 mb-4 flex items-center gap-2">
           <Download className="w-5 h-5" />
@@ -513,7 +634,7 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
         </h3>
 
         <p className="text-cocoa-600 mb-4">
-          Gérez votre abonnement, téléchargez vos factures, mettez à jour votre moyen de paiement ou annulez votre abonnement depuis le portail Stripe.
+          Gérez votre abonnement, mettez à jour votre moyen de paiement ou annulez votre abonnement depuis le portail Stripe.
         </p>
 
         <button
