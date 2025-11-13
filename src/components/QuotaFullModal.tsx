@@ -60,7 +60,7 @@ export const QuotaFullModal = ({
               <Crown className="w-6 h-6" />
               <div className="text-left">
                 <div className="font-bold text-lg">Passer à la formule Illimitée</div>
-                <div className="text-sm text-white/90">39€/mois - Réunions illimitées dès maintenant</div>
+                <div className="text-sm text-white/90">49€/mois - Réunions illimitées dès maintenant</div>
               </div>
             </div>
           </button>

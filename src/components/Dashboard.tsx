@@ -314,7 +314,7 @@ export function Dashboard() {
                     {subscription.plan_type === 'unlimited' ? 'Formule Illimitée' : 'Formule Starter'}
                   </h2>
                   <p className="text-cocoa-600">
-                    {subscription.plan_type === 'unlimited' ? '39€/mois' : '29€/mois - 600 minutes'}
+                    {subscription.plan_type === 'unlimited' ? '49€/mois' : '39€/mois - 600 minutes'}
                   </p>
                 </div>
               </div>

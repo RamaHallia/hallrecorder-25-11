@@ -64,7 +64,7 @@ export const UploadQuotaErrorModal = ({
               <Crown className="w-6 h-6" />
               <div className="text-left">
                 <div className="font-bold text-lg">Passer à la formule Illimitée</div>
-                <div className="text-sm text-white/90">39€/mois - Aucune limite de minutes</div>
+                <div className="text-sm text-white/90">49€/mois - Aucune limite de minutes</div>
               </div>
             </div>
           </button>

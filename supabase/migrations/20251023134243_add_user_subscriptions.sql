@@ -5,7 +5,7 @@
     - `user_subscriptions`
       - `id` (uuid, primary key)
       - `user_id` (uuid, foreign key to auth.users)
-      - `plan_type` (text) - 'starter' (29€) ou 'unlimited' (39€)
+      - `plan_type` (text) - 'starter' (39€ HT) ou 'unlimited' (49€ HT)
       - `minutes_quota` (integer) - 600 pour starter, null pour unlimited
       - `minutes_used_this_month` (integer) - minutes utilisées ce mois
       - `billing_cycle_start` (timestamptz) - début du cycle de facturation

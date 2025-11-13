@@ -4,6 +4,12 @@
 
 J'ai mis à jour le système de paiement Stripe pour qu'il synchronise automatiquement la table `user_subscriptions` lorsqu'un utilisateur paie un abonnement.
 
+## Tarifs
+
+- **Formule Starter** : 39€ HT / mois (600 minutes)
+- **Formule Illimitée** : 49€ HT / mois (minutes illimitées)
+- Sans engagement
+
 ## Modifications effectuées
 
 ### 1. Webhook Stripe (`supabase/functions/stripe-webhook/index.ts`)
@@ -11,8 +17,8 @@ J'ai mis à jour le système de paiement Stripe pour qu'il synchronise automatiq
 Le webhook a été amélioré pour :
 
 - **Mapper les Price IDs Stripe aux types de plans** :
-  - `price_1SSyMI14zZqoQtSCb1gqGhke` → `starter` (600 minutes/mois)
-  - `price_1SSyNh14zZqoQtSCqPL9VwTj` → `unlimited` (minutes illimitées)
+  - `price_1SSyMI14zZqoQtSCb1gqGhke` → `starter` (39€ HT, 600 minutes/mois)
+  - `price_1SSyNh14zZqoQtSCqPL9VwTj` → `unlimited` (49€ HT, minutes illimitées)
 
 - **Mettre à jour automatiquement `user_subscriptions`** :
   ```typescript
