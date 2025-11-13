@@ -190,17 +190,21 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
         }
       );
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Erreur lors de la création de la session de facturation');
+        console.error('Billing portal error:', data);
+        throw new Error(data.error || 'Erreur lors de la création de la session de facturation');
       }
 
-      const { url } = await response.json();
-      if (url) {
-        window.location.href = url;
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('URL du portail non reçue');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error:', err);
-      setError('Erreur lors de l\'accès au portail de facturation');
+      setError(err.message || 'Erreur lors de l\'accès au portail de facturation');
     } finally {
       setIsProcessing(false);
     }
