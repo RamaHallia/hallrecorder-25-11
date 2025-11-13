@@ -1466,8 +1466,16 @@ function App() {
       console.log('✅ Login réussi, initialisation...');
       try {
         setIsAuthLoading(false);
-        console.log('📍 setView(record)');
-        setView('record');
+        // Respecter le hash de l'URL s'il existe
+        const hash = window.location.hash.replace('#', '');
+        if (hash && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hash)) {
+          console.log('📍 setView depuis hash:', hash);
+          setView(hash as any);
+        } else {
+          console.log('📍 setView(record)');
+          setView('record');
+          window.location.hash = 'record';
+        }
         console.log('✅ Vue changée avec succès');
       } catch (error) {
         console.error('❌ Erreur après login:', error);
