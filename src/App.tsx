@@ -1451,7 +1451,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-red-50 to-amber-50 flex flex-col md:flex-row">
+    <div className="h-screen bg-gradient-to-br from-orange-50 via-red-50 to-amber-50 flex flex-col md:flex-row overflow-hidden">
       {/* Setup Reminder Banner */}
       {user && (
         <SetupReminder 
@@ -1598,16 +1598,16 @@ function App() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto">
-        <div className={view === 'record' ? 'flex gap-6 h-full' : 'max-w-6xl mx-auto px-4 md:px-8 py-4 md:py-8 min-h-screen'}>
+      <main className="flex-1 overflow-auto h-full">
+        <div className={view === 'record' ? 'flex gap-6 h-full' : 'max-w-6xl mx-auto px-4 md:px-8 py-4 md:py-8 h-full'}>
           {view === 'record' ? (
             <>
               {/* Contenu principal de l'enregistrement */}
-              <div className="flex-1 px-4 md:px-8 py-4 md:py-8 overflow-auto">
+              <div className="flex-1 px-4 md:px-8 py-4 md:py-8 overflow-auto flex items-center justify-center">
               {!isRecording ? (
-                <div className="relative bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-12 border-2 border-orange-100 overflow-hidden">
+                <div className="relative bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-12 border-2 border-orange-100 overflow-hidden w-full max-w-5xl">
                   <div className="absolute inset-0 bg-gradient-to-br from-coral-50/30 via-transparent to-sunset-50/30 pointer-events-none"></div>
-                  <div className="relative flex flex-col items-center justify-center py-8 md:py-16">
+                  <div className="relative flex flex-col items-center justify-center py-8">
                     <div className="mb-12">
                     <RecordingControls
                       isRecording={isRecording}
@@ -1660,9 +1660,9 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div className="relative bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-12 border-2 border-orange-100 overflow-hidden">
+                <div className="relative bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-12 border-2 border-orange-100 overflow-auto w-full max-w-7xl h-full">
                   <div className="absolute inset-0 bg-gradient-to-br from-coral-50/20 via-transparent to-sunset-50/20 pointer-events-none"></div>
-                  <div className="relative flex flex-col items-center py-4 md:py-8">
+                  <div className="relative flex flex-col items-center py-4 md:py-8 h-full">
                     <button
                       onClick={handleStopRecordingRequest}
                       className="mb-6 md:mb-8 group transition-transform hover:scale-105 active:scale-95 cursor-pointer"

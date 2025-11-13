@@ -243,7 +243,7 @@ export function Dashboard() {
     .reverse();
  
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+    <div className="h-full bg-gray-50 p-4 md:p-8 overflow-auto">
       <div className="max-w-7xl mx-auto">
         {/* Header avec filtres */}
         <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 animate-fadeInDown">

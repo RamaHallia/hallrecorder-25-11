@@ -503,7 +503,7 @@ export const Settings = ({ userId }: SettingsProps) => {
   // Supprimer l'affichage du récapitulatif séparé - tout sera affiché dans le mode édition
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-peach-50 via-white to-coral-50 p-4 md:p-8">
+    <div className="h-full bg-gradient-to-br from-peach-50 via-white to-coral-50 p-4 md:p-8 overflow-auto">
       <div className="max-w-7xl mx-auto">
         <h2 className="text-3xl font-bold text-cocoa-900 mb-8 animate-fadeInDown">
           Paramètres
