@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
 
     const { data: userSub, error: subError } = await supabase
       .from('user_subscriptions')
-      .select('plan_type, stripe_customer_id, stripe_price_id')
+      .select('plan_type, stripe_customer_id, stripe_price_id, pending_downgrade_plan')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -97,8 +97,53 @@ Deno.serve(async (req) => {
     const currentPlan = userSub.plan_type as 'starter' | 'unlimited';
     const newPlan = new_plan as 'starter' | 'unlimited';
 
+    console.log(`User ${user.id}: Current plan = ${currentPlan}, Requested plan = ${newPlan}`);
+    console.log('User subscription data:', JSON.stringify(userSub));
+
+    if (userSub.pending_downgrade_plan) {
+      console.log(`User has pending downgrade to ${userSub.pending_downgrade_plan}`);
+
+      if (userSub.pending_downgrade_plan === newPlan) {
+        console.error(`User already has pending change to ${newPlan}`);
+        return new Response(JSON.stringify({
+          error: `Vous avez déjà programmé un changement vers ce plan`,
+          current_plan: currentPlan,
+          pending_plan: userSub.pending_downgrade_plan
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (newPlan === currentPlan) {
+        console.log(`Cancelling pending downgrade to ${userSub.pending_downgrade_plan}`);
+        const { error: cancelError } = await supabase
+          .from('user_subscriptions')
+          .update({ pending_downgrade_plan: null })
+          .eq('user_id', user.id);
+
+        if (cancelError) {
+          console.error('Error cancelling pending downgrade:', cancelError);
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          message: `Changement de plan annulé. Vous restez sur le plan ${currentPlan === 'unlimited' ? 'Illimité' : 'Starter'}.`,
+          type: 'cancel'
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     if (currentPlan === newPlan) {
-      return new Response(JSON.stringify({ error: 'Already on this plan' }), {
+      console.error(`User already on ${currentPlan} plan, cannot change to same plan`);
+      return new Response(JSON.stringify({
+        error: 'Already on this plan',
+        current_plan: currentPlan,
+        requested_plan: newPlan
+      }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

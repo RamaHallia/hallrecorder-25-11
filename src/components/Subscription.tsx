@@ -168,6 +168,12 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
         return;
       }
 
+      if (!subscription || selectedPlan === subscription.plan_type) {
+        throw new Error('Veuillez sélectionner un plan différent de votre plan actuel');
+      }
+
+      console.log('Changing plan from', subscription.plan_type, 'to', selectedPlan);
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/change-subscription-plan`,
         {
@@ -185,6 +191,7 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
       const data = await response.json();
 
       if (!response.ok) {
+        console.error('Change plan error:', data);
         throw new Error(data.error || 'Erreur lors du changement de plan');
       }
 
