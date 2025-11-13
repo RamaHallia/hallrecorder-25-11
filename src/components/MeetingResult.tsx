@@ -48,32 +48,33 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
 
   // Charger les paramètres utilisateur
   const handleWordDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    console.log('🖱️ Double-clic détecté');
+
     const selection = window.getSelection();
-    const target = e.target as HTMLElement;
-    const text = target.textContent || '';
+    if (!selection) return;
 
-    if (selection && text) {
-      let clickX = e.clientX;
-      let clickY = e.clientY;
+    selection.modify('move', 'backward', 'word');
+    selection.modify('extend', 'forward', 'word');
 
-      const range = document.caretRangeFromPoint(clickX, clickY);
-      if (range) {
-        const textNode = range.startContainer;
-        const offset = range.startOffset;
-        const nodeText = textNode.textContent || '';
+    const selectedText = selection.toString().trim();
+    console.log('📝 Mot sélectionné:', selectedText);
 
-        const wordRegex = /\b[\w'À-ſ]+\b/g;
-        let match;
-        while ((match = wordRegex.exec(nodeText)) !== null) {
-          if (offset >= match.index && offset <= match.index + match[0].length) {
-            setSelectedWord(match[0]);
-            setWordPosition({ start: match.index, end: match.index + match[0].length, text: nodeText });
-            setShowWordCorrection(true);
-            break;
-          }
-        }
+    if (selectedText && selectedText.length > 0) {
+      const wordMatch = selectedText.match(/^[\w'À-ſ]+$/);
+      if (wordMatch) {
+        setSelectedWord(selectedText);
+        setWordPosition({ start: 0, end: selectedText.length, text: selectedText });
+        setShowWordCorrection(true);
+        console.log('✅ Modal ouverte pour:', selectedText);
+      } else {
+        console.log('⚠️ Texte sélectionné invalide:', selectedText);
       }
     }
+
+    selection.removeAllRanges();
   };
 
   const handleWordReplace = async (newWord: string, replaceAll: boolean, saveToDict: boolean) => {
