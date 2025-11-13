@@ -369,7 +369,7 @@ function App() {
 
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '');
-      if (hash && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact'].includes(hash)) {
+      if (hash && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hash)) {
         console.log('🔄 Hash changé:', hash);
         setView(hash as any);
       } else if (hash === 'detail') {
