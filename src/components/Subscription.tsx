@@ -122,6 +122,10 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
   };
 
   const handleChangePlan = async () => {
+    if (isProcessing) {
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
     setChangeMessage(null);
@@ -521,7 +525,7 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
           <button
             onClick={handleChangePlan}
             disabled={isProcessing}
-            className="group relative w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+            className="group relative w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
             <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
             {isProcessing ? (
@@ -539,7 +543,7 @@ export const Subscription = ({ userId }: SubscriptionProps) => {
           <button
             onClick={handleChangePlan}
             disabled={isProcessing}
-            className="group relative w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+            className="group relative w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
             <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
             {isProcessing ? (
