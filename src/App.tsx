@@ -772,8 +772,8 @@ function App() {
 
       // 2) Générer le résumé
       setProcessingStatus('Génération du résumé IA...');
-      
-      const result = await generateSummary(finalTranscript);
+
+      const result = await generateSummary(finalTranscript, userId);
       console.log('✅ Résumé généré:', { title: result.title, summaryLength: result.summary?.length });
       
       const { title, summary } = result;

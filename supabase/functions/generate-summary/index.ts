@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { transcript } = await req.json();
+    const { transcript, userId } = await req.json();
 
     if (!transcript) {
       return new Response(
@@ -301,14 +301,51 @@ Deno.serve(async (req) => {
     }
 
     const result = await response.json();
-    const content = result.choices[0]?.message?.content || "{}";
-    
+    let content = result.choices[0]?.message?.content || "{}";
+
     console.log("Tokens utilisés:", result.usage);
     console.log("Longueur du contenu reçu:", content.length, "caractères");
-    
+
     let parsed;
     try {
       parsed = JSON.parse(content);
+
+      if (userId && parsed.summary) {
+        const supabaseUrl = Deno.env.get('SUPABASE_URL');
+        const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+        if (supabaseUrl && supabaseKey) {
+          const dictionaryResponse = await fetch(`${supabaseUrl}/rest/v1/custom_dictionary?user_id=eq.${userId}&select=incorrect_word,correct_word`, {
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+            },
+          });
+
+          if (dictionaryResponse.ok) {
+            const dictionary = await dictionaryResponse.json();
+
+            if (dictionary && dictionary.length > 0) {
+              let correctedSummary = parsed.summary;
+              dictionary.forEach(({ incorrect_word, correct_word }: { incorrect_word: string; correct_word: string }) => {
+                const regex = new RegExp(`\\b${incorrect_word}\\b`, 'gi');
+                correctedSummary = correctedSummary.replace(regex, correct_word);
+              });
+              parsed.summary = correctedSummary;
+
+              if (parsed.title) {
+                let correctedTitle = parsed.title;
+                dictionary.forEach(({ incorrect_word, correct_word }: { incorrect_word: string; correct_word: string }) => {
+                  const regex = new RegExp(`\\b${incorrect_word}\\b`, 'gi');
+                  correctedTitle = correctedTitle.replace(regex, correct_word);
+                });
+                parsed.title = correctedTitle;
+              }
+              console.log("✅ Applied custom dictionary corrections");
+            }
+          }
+        }
+      }
     } catch (e) {
       console.error("❌ Erreur parsing JSON:", e);
       console.error("📝 Contenu brut (premiers 500 car):", content.substring(0, 500));

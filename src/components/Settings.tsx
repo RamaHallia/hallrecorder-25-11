@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Upload, X, CreditCard as Edit2, Mail, Crown, Zap, CreditCard } from 'lucide-react';
+import { Save, Upload, X, CreditCard as Edit2, Mail, Crown, Zap, CreditCard, BookOpen, Plus, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface SettingsProps {
@@ -38,10 +38,14 @@ export const Settings = ({ userId }: SettingsProps) => {
   const [gmailConnected, setGmailConnected] = useState(false);
   const [gmailEmail, setGmailEmail] = useState('');
   const [isConnectingGmail, setIsConnectingGmail] = useState(false);
+  const [customDictionary, setCustomDictionary] = useState<Array<{ id: string; incorrect_word: string; correct_word: string }>>([]);
+  const [newIncorrectWord, setNewIncorrectWord] = useState('');
+  const [newCorrectWord, setNewCorrectWord] = useState('');
 
   useEffect(() => {
     loadSettings();
     loadSubscription();
+    loadCustomDictionary();
 
     // Écouter les messages de la popup OAuth
     const handleMessage = (event: MessageEvent) => {
@@ -94,6 +98,61 @@ export const Settings = ({ userId }: SettingsProps) => {
       setGmailConnected(data.gmail_connected || false);
       setGmailEmail(data.gmail_email || '');
     }
+  };
+
+  const loadCustomDictionary = async () => {
+    const { data, error } = await supabase
+      .from('custom_dictionary')
+      .select('id, incorrect_word, correct_word')
+      .eq('user_id', userId)
+      .order('incorrect_word', { ascending: true });
+
+    if (data) {
+      setCustomDictionary(data);
+    }
+  };
+
+  const handleAddWord = async () => {
+    if (!newIncorrectWord.trim() || !newCorrectWord.trim()) {
+      alert('Veuillez remplir les deux champs');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('custom_dictionary')
+      .upsert({
+        user_id: userId,
+        incorrect_word: newIncorrectWord.toLowerCase().trim(),
+        correct_word: newCorrectWord.trim(),
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id,incorrect_word',
+      });
+
+    if (error) {
+      alert('Erreur lors de l\'ajout du mot');
+      console.error(error);
+      return;
+    }
+
+    setNewIncorrectWord('');
+    setNewCorrectWord('');
+    await loadCustomDictionary();
+  };
+
+  const handleDeleteWord = async (id: string) => {
+    const { error } = await supabase
+      .from('custom_dictionary')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      alert('Erreur lors de la suppression');
+      console.error(error);
+      return;
+    }
+
+    await loadCustomDictionary();
   };
 
   const loadSubscription = async () => {
@@ -1066,6 +1125,92 @@ export const Settings = ({ userId }: SettingsProps) => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Dictionnaire personnalisé */}
+        <div className="bg-white rounded-2xl shadow-lg border-2 border-coral-200 p-6 animate-fadeInUp delay-300">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-md">
+              <BookOpen className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-cocoa-900">Dictionnaire personnalisé</h3>
+              <p className="text-sm text-cocoa-600">Enregistrez les termes spécifiques à corriger automatiquement</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 border-2 border-blue-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-sm font-semibold text-cocoa-700 mb-2">
+                    Mot incorrect
+                  </label>
+                  <input
+                    type="text"
+                    value={newIncorrectWord}
+                    onChange={(e) => setNewIncorrectWord(e.target.value)}
+                    placeholder="ex: hallia, olia"
+                    className="w-full px-4 py-2 border-2 border-blue-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-cocoa-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-cocoa-700 mb-2">
+                    Correction
+                  </label>
+                  <input
+                    type="text"
+                    value={newCorrectWord}
+                    onChange={(e) => setNewCorrectWord(e.target.value)}
+                    placeholder="ex: Hallia, OLIA"
+                    className="w-full px-4 py-2 border-2 border-blue-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-cocoa-800"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handleAddWord}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all font-semibold shadow-md hover:shadow-lg"
+              >
+                <Plus className="w-5 h-5" />
+                Ajouter au dictionnaire
+              </button>
+            </div>
+
+            {customDictionary.length > 0 ? (
+              <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                {customDictionary.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between p-4 bg-gradient-to-br from-peach-50 to-coral-50 rounded-xl border-2 border-coral-200 hover:border-coral-300 transition-all"
+                  >
+                    <div className="flex-1 grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-xs font-semibold text-cocoa-600 uppercase">Incorrect</span>
+                        <p className="text-cocoa-900 font-medium">{entry.incorrect_word}</p>
+                      </div>
+                      <div>
+                        <span className="text-xs font-semibold text-cocoa-600 uppercase">Correction</span>
+                        <p className="text-green-700 font-semibold">{entry.correct_word}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteWord(entry.id)}
+                      className="p-2 bg-red-100 hover:bg-red-200 text-red-600 rounded-lg transition-colors ml-4"
+                      title="Supprimer"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-cocoa-500">
+                <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">Aucun mot dans le dictionnaire</p>
+                <p className="text-xs mt-1">Ajoutez des termes spécifiques comme des noms d'entreprise</p>
+              </div>
+            )}
           </div>
         </div>
 

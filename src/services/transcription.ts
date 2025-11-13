@@ -102,9 +102,9 @@ export const transcribeLongAudio = async (
   }
 };
 
-export const generateSummary = async (transcript: string, retryCount = 0): Promise<{ title: string; summary: string }> => {
+export const generateSummary = async (transcript: string, userId?: string, retryCount = 0): Promise<{ title: string; summary: string }> => {
   console.log('🔄 generateSummary appelé - Transcript length:', transcript.length, 'Retry:', retryCount);
-  
+
   try {
     const response = await fetch(
       `${SUPABASE_URL}/functions/v1/generate-summary`,
@@ -114,7 +114,7 @@ export const generateSummary = async (transcript: string, retryCount = 0): Promi
           'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ transcript }),
+        body: JSON.stringify({ transcript, userId }),
       }
     );
 
@@ -128,9 +128,9 @@ export const generateSummary = async (transcript: string, retryCount = 0): Promi
       if (response.status === 429 && retryCount < 3) {
         const delay = Math.pow(2, retryCount) * 1000; // Délai exponentiel: 1s, 2s, 4s
         console.log(`⏳ Rate limit détecté, retry dans ${delay}ms`);
-        
+
         await new Promise(resolve => setTimeout(resolve, delay));
-        return generateSummary(transcript, retryCount + 1);
+        return generateSummary(transcript, userId, retryCount + 1);
       }
       
       throw new Error(error.error || `Summary generation failed (${response.status})`);
@@ -144,9 +144,9 @@ export const generateSummary = async (transcript: string, retryCount = 0): Promi
     if (retryCount < 3 && error instanceof Error && error.message.includes('429')) {
       const delay = Math.pow(2, retryCount) * 1000;
       console.log(`⏳ Retry dans ${delay}ms`);
-      
+
       await new Promise(resolve => setTimeout(resolve, delay));
-      return generateSummary(transcript, retryCount + 1);
+      return generateSummary(transcript, userId, retryCount + 1);
     }
     throw error;
   }

@@ -276,7 +276,7 @@ export const AudioUpload = ({ userId, onSuccess }: AudioUploadProps) => {
       const summaryProgress = 'Génération du résumé IA...';
       setProgress(summaryProgress);
       await updateTask(taskId, { progress: summaryProgress, progress_percent: 80 });
-      const { title, summary } = await generateSummary(fullTranscript);
+      const { title, summary } = await generateSummary(fullTranscript, userId);
 
       // 3) Créer la réunion UNIQUEMENT si transcription + résumé ont réussi
       const createProgress = 'Enregistrement de la réunion...';

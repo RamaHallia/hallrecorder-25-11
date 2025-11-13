@@ -5,6 +5,7 @@ import { generatePDFFromHTML } from '../services/pdfGenerator';
 import { EmailComposer } from './EmailComposer';
 import { generateEmailBody } from '../services/emailTemplates';
 import { SuccessModal } from './SuccessModal';
+import { WordCorrectionModal } from './WordCorrectionModal';
 
 interface MeetingResultProps {
   title: string;
@@ -28,6 +29,9 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'suggestions'>('summary');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [showEmailComposer, setShowEmailComposer] = useState(false);
+  const [showWordCorrection, setShowWordCorrection] = useState(false);
+  const [selectedWord, setSelectedWord] = useState('');
+  const [wordPosition, setWordPosition] = useState({ start: 0, end: 0, text: '' });
   const [emailMethod, setEmailMethod] = useState<'gmail' | 'local' | 'smtp'>('gmail');
   const [copySuccess, setCopySuccess] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
@@ -43,6 +47,84 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
   const [signatureLogoUrl, setSignatureLogoUrl] = useState('');
 
   // Charger les paramètres utilisateur
+  const handleWordDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const selection = window.getSelection();
+    const target = e.target as HTMLElement;
+    const text = target.textContent || '';
+
+    if (selection && text) {
+      let clickX = e.clientX;
+      let clickY = e.clientY;
+
+      const range = document.caretRangeFromPoint(clickX, clickY);
+      if (range) {
+        const textNode = range.startContainer;
+        const offset = range.startOffset;
+        const nodeText = textNode.textContent || '';
+
+        const wordRegex = /\b[\w'À-ſ]+\b/g;
+        let match;
+        while ((match = wordRegex.exec(nodeText)) !== null) {
+          if (offset >= match.index && offset <= match.index + match[0].length) {
+            setSelectedWord(match[0]);
+            setWordPosition({ start: match.index, end: match.index + match[0].length, text: nodeText });
+            setShowWordCorrection(true);
+            break;
+          }
+        }
+      }
+    }
+  };
+
+  const handleWordReplace = async (newWord: string, replaceAll: boolean, saveToDict: boolean) => {
+    if (saveToDict) {
+      const { error } = await supabase
+        .from('custom_dictionary')
+        .upsert({
+          user_id: userId,
+          incorrect_word: selectedWord.toLowerCase(),
+          correct_word: newWord,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,incorrect_word',
+        });
+
+      if (error) {
+        console.error('Erreur lors de l\'enregistrement dans le dictionnaire:', error);
+      }
+    }
+
+    if (activeTab === 'summary') {
+      if (replaceAll) {
+        const regex = new RegExp(`\\b${selectedWord}\\b`, 'gi');
+        setEditedSummary(prev => prev.replace(regex, newWord));
+      } else {
+        const before = editedSummary.substring(0, wordPosition.start);
+        const after = editedSummary.substring(wordPosition.end);
+        setEditedSummary(before + newWord + after);
+      }
+    } else if (activeTab === 'transcript') {
+      if (replaceAll) {
+        const regex = new RegExp(`\\b${selectedWord}\\b`, 'gi');
+        setEditedTranscript(prev => prev.replace(regex, newWord));
+      } else {
+        const before = editedTranscript.substring(0, wordPosition.start);
+        const after = editedTranscript.substring(wordPosition.end);
+        setEditedTranscript(before + newWord + after);
+      }
+    }
+
+    if (meetingId) {
+      await supabase
+        .from('meetings')
+        .update({
+          summary: activeTab === 'summary' ? editedSummary : undefined,
+          display_transcript: activeTab === 'transcript' ? editedTranscript : undefined,
+        })
+        .eq('id', meetingId);
+    }
+  };
+
   const loadSettings = useCallback(async () => {
     if (!userId) return;
 
@@ -748,7 +830,10 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
                 />
               ) : (
                 <div className="prose prose-slate max-w-none">
-                  <div className="text-cocoa-800 whitespace-pre-wrap leading-relaxed text-lg">
+                  <div
+                    className="text-cocoa-800 whitespace-pre-wrap leading-relaxed text-lg cursor-text"
+                    onDoubleClick={handleWordDoubleClick}
+                  >
                     {renderSummaryWithBold(editedSummary)}
                   </div>
                 </div>
@@ -807,7 +892,10 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
                               
                               {/* Contenu */}
                               <div className="p-3">
-                                <p className="text-cocoa-700 leading-relaxed text-sm">
+                                <p
+                                  className="text-cocoa-700 leading-relaxed text-sm cursor-text"
+                                  onDoubleClick={handleWordDoubleClick}
+                                >
                                   {chunk.trim()}
                                 </p>
                               </div>
@@ -894,6 +982,14 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
         isOpen={showSuccessModal}
         message={successMessage}
         onClose={() => setShowSuccessModal(false)}
+      />
+
+      {/* Modal de correction de mot */}
+      <WordCorrectionModal
+        isOpen={showWordCorrection}
+        word={selectedWord}
+        onReplace={handleWordReplace}
+        onClose={() => setShowWordCorrection(false)}
       />
     </div>
   );
