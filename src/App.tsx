@@ -1491,13 +1491,36 @@ function App() {
     console.error('❌ Erreur dans render:', e);
   }
 
+  // Bloquer l'accès si pas d'abonnement actif (sauf pour la page subscription)
+  if (user && (!subscription || !subscription.is_active) && view !== 'subscription') {
+    return (
+      <div className="h-screen bg-gradient-to-br from-orange-50 via-red-50 to-amber-50 flex items-center justify-center p-4">
+        {showSubscriptionModal && (
+          <SubscriptionSelection
+            onClose={async () => {
+              await checkSubscription(user.id);
+              if (subscription && subscription.is_active) {
+                setShowSubscriptionModal(false);
+                setView('record');
+                window.location.hash = 'record';
+              }
+            }}
+            currentPlan={subscription?.plan_type}
+            upgradeOnly={false}
+            canClose={false}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen bg-gradient-to-br from-orange-50 via-red-50 to-amber-50 flex flex-col md:flex-row overflow-hidden">
       {/* Setup Reminder Banner */}
-      {user && (
-        <SetupReminder 
-          userId={user.id} 
-          onNavigateToSettings={() => setView('settings')} 
+      {user && subscription && subscription.is_active && (
+        <SetupReminder
+          userId={user.id}
+          onNavigateToSettings={() => setView('settings')}
         />
       )}
       
@@ -2483,13 +2506,15 @@ function App() {
       {/* Modal de sélection d'abonnement */}
       {showSubscriptionModal && (
         <SubscriptionSelection
-          onClose={() => {
+          onClose={async () => {
+            await checkSubscription(user.id);
             if (subscription && subscription.is_active) {
               setShowSubscriptionModal(false);
             }
           }}
           currentPlan={subscription?.plan_type}
           upgradeOnly={subscriptionUpgradeOnly}
+          canClose={!!(subscription && subscription.is_active)}
         />
       )}
     </div>

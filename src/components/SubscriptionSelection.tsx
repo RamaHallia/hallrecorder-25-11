@@ -6,12 +6,14 @@ interface SubscriptionSelectionProps {
   onClose: () => void;
   currentPlan?: 'starter' | 'unlimited';
   upgradeOnly?: boolean;
+  canClose?: boolean;
 }
 
 export const SubscriptionSelection = ({
   onClose,
   currentPlan,
-  upgradeOnly = false
+  upgradeOnly = false,
+  canClose = true
 }: SubscriptionSelectionProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'starter' | 'unlimited' | null>(null);
@@ -117,24 +119,28 @@ export const SubscriptionSelection = ({
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-3xl font-bold mb-2">
-                {upgradeOnly ? 'Passer à la formule Illimitée' : 'Choisissez votre abonnement'}
+                {!canClose ? '🎉 Bienvenue ! Choisissez votre abonnement' : upgradeOnly ? 'Passer à la formule Illimitée' : 'Choisissez votre abonnement'}
               </h2>
               <p className="text-white/90">
-                {upgradeOnly
+                {!canClose
+                  ? 'Pour commencer à utiliser Hallia, sélectionnez la formule qui vous convient'
+                  : upgradeOnly
                   ? 'Continuez sans limites avec la formule Illimitée'
-                  : 'Commencez dès maintenant avec Meeting Recorder'
+                  : 'Commencez dès maintenant avec Hallia'
                 }
               </p>
             </div>
-            <button
-              onClick={onClose}
-              className="text-white/80 hover:text-white transition-colors"
-              disabled={isProcessing}
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            {canClose && (
+              <button
+                onClick={onClose}
+                className="text-white/80 hover:text-white transition-colors"
+                disabled={isProcessing}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
