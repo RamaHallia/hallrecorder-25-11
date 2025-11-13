@@ -884,6 +884,75 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
 
 
 
+  if (isEditing) {
+    return (
+      <div className="bg-white rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden border-2 border-orange-100 h-full flex flex-col">
+        <div className="bg-gradient-to-r from-coral-500 to-sunset-500 p-4 md:p-6 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <Edit2 className="w-5 h-5 md:w-6 md:h-6 text-white" />
+            <h2 className="text-xl md:text-2xl font-bold text-white">Modification de la réunion</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCancelEdit}
+              className="flex items-center gap-2 px-3 md:px-5 py-2 md:py-2.5 bg-white/20 hover:bg-white/30 text-white rounded-lg md:rounded-xl transition-colors font-semibold text-sm md:text-base"
+            >
+              <X className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="hidden sm:inline">Annuler</span>
+            </button>
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-2 px-3 md:px-5 py-2 md:py-2.5 bg-white text-coral-600 hover:bg-orange-50 rounded-lg md:rounded-xl transition-colors font-semibold shadow-lg text-sm md:text-base"
+            >
+              <Save className="w-4 h-4 md:w-5 md:h-5" />
+              Enregistrer
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
+          <div>
+            <label className="block text-sm font-bold text-cocoa-800 mb-2">
+              Titre de la réunion
+            </label>
+            <input
+              type="text"
+              value={editedTitle}
+              onChange={(e) => setEditedTitle(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-coral-500 focus:border-coral-500 text-cocoa-800 text-lg font-semibold"
+              placeholder="Titre de la réunion"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-cocoa-800 mb-2">
+              <FileText className="w-4 h-4 inline mr-2 text-amber-600" />
+              Notes prises pendant l'enregistrement
+            </label>
+            <textarea
+              value={editedNotes}
+              onChange={(e) => setEditedNotes(e.target.value)}
+              placeholder="Ajoutez vos notes ici..."
+              className="w-full min-h-[100px] p-4 border-2 border-amber-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-cocoa-800 leading-relaxed bg-gradient-to-br from-amber-50 to-orange-50 resize-y"
+            />
+          </div>
+
+          <div className="flex-1">
+            <label className="block text-sm font-bold text-cocoa-800 mb-2">
+              Résumé IA
+            </label>
+            <textarea
+              value={editedSummary}
+              onChange={(e) => setEditedSummary(e.target.value)}
+              placeholder="Le résumé généré par l'IA apparaîtra ici..."
+              className="w-full min-h-[500px] p-6 border-2 border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-coral-500 focus:border-coral-500 text-cocoa-800 text-lg leading-relaxed resize-y"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="bg-white rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden border-2 border-orange-100 h-full flex flex-col">
@@ -899,33 +968,14 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
               </button>
 
               <div className="flex items-center gap-2 w-full sm:w-auto pb-6 sm:pb-0">
-                {isEditing ? (
-                  <>
-                    <button
-                      onClick={handleCancelEdit}
-                      className="flex items-center gap-1 md:gap-2 px-3 md:px-5 py-2 md:py-3 text-cocoa-600 hover:text-cocoa-800 hover:bg-orange-50 rounded-lg md:rounded-xl transition-colors font-semibold text-sm md:text-base flex-1 sm:flex-initial justify-center"
-                    >
-                      <X className="w-4 h-4 md:w-5 md:h-5" />
-                      <span>Annuler</span>
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      className="flex items-center gap-1 md:gap-2 px-3 md:px-5 py-2 md:py-3 bg-gradient-to-r from-coral-500 to-coral-600 text-white hover:from-coral-600 hover:to-coral-700 rounded-lg md:rounded-xl transition-all shadow-lg shadow-coral-500/30 text-sm md:text-base flex-1 sm:flex-initial justify-center"
-                    >
-                      <Save className="w-4 h-4 md:w-5 md:h-5" />
-                      <span className="font-semibold">Enregistrer</span>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={handleDownloadPDF}
-                      className="flex items-center gap-2 px-3 md:px-4 py-2 md:py-3 bg-gradient-to-r from-red-500 to-red-600 text-white hover:from-red-600 hover:to-red-700 rounded-lg transition-all shadow-sm font-semibold text-sm flex-1 sm:flex-initial justify-center"
-                    >
-                      <FileDown className="w-4 h-4 md:w-5 md:h-5" />
-                      <span className="hidden sm:inline">Télécharger PDF</span>
-                      <span className="sm:hidden">PDF</span>
-                    </button>
+                <button
+                  onClick={handleDownloadPDF}
+                  className="flex items-center gap-2 px-3 md:px-4 py-2 md:py-3 bg-gradient-to-r from-red-500 to-red-600 text-white hover:from-red-600 hover:to-red-700 rounded-lg transition-all shadow-sm font-semibold text-sm flex-1 sm:flex-initial justify-center"
+                >
+                  <FileDown className="w-4 h-4 md:w-5 md:h-5" />
+                  <span className="hidden sm:inline">Télécharger PDF</span>
+                  <span className="sm:hidden">PDF</span>
+                </button>
                     
                     {/* Bouton télécharger audio */}
                     {meeting.audio_url && (
@@ -999,16 +1049,14 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
                       <span className="hidden sm:inline">Envoyer par email</span>
                       <span className="sm:hidden">Email</span>
                     </button>
-                    <button
-                      onClick={() => setIsEditing(true)}
-                      className="flex items-center gap-1 md:gap-2 px-3 md:px-5 py-2 md:py-3 text-cocoa-600 hover:text-cocoa-800 hover:bg-orange-50 rounded-lg md:rounded-xl transition-colors font-semibold border-2 border-transparent hover:border-orange-200 text-sm md:text-base flex-1 sm:flex-initial justify-center"
-                    >
-                      <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
-                      <span className="hidden sm:inline">Modifier</span>
-                      <span className="sm:hidden">Modifier</span>
-                    </button>
-                  </>
-                )}
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="flex items-center gap-1 md:gap-2 px-3 md:px-5 py-2 md:py-3 text-cocoa-600 hover:text-cocoa-800 hover:bg-orange-50 rounded-lg md:rounded-xl transition-colors font-semibold border-2 border-transparent hover:border-orange-200 text-sm md:text-base flex-1 sm:flex-initial justify-center"
+                >
+                  <Edit2 className="w-4 h-4 md:w-5 md:h-5" />
+                  <span className="hidden sm:inline">Modifier</span>
+                  <span className="sm:hidden">Modifier</span>
+                </button>
               </div>
             </div>
 
@@ -1017,18 +1065,9 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
                 <FileText className="w-6 h-6 md:w-8 md:h-8 text-white" />
               </div>
               <div className="flex-1 min-w-0">
-                {isEditing ? (
-                  <input
-                    type="text"
-                    value={editedTitle}
-                    onChange={(e) => setEditedTitle(e.target.value)}
-                    className="text-xl md:text-4xl font-bold text-cocoa-800 mb-2 md:mb-4 w-full border-b-2 border-coral-500 focus:outline-none bg-transparent"
-                  />
-                ) : (
-                  <h1 className="text-xl md:text-4xl font-bold bg-gradient-to-r from-coral-600 to-sunset-600 bg-clip-text text-transparent mb-2 md:mb-4 break-words">
-                    {meeting.title}
-                  </h1>
-                )}
+                <h1 className="text-xl md:text-4xl font-bold bg-gradient-to-r from-coral-600 to-sunset-600 bg-clip-text text-transparent mb-2 md:mb-4 break-words">
+                  {meeting.title}
+                </h1>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 text-cocoa-600 font-medium text-xs md:text-base">
                   <div className="flex items-center gap-1 md:gap-2">
                     <Calendar className="w-4 h-4 md:w-5 md:h-5 text-sunset-500" />
@@ -1088,7 +1127,7 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
 
         <div className="p-4 md:p-10 flex-1 overflow-auto flex justify-center">
           <div className="w-full max-w-5xl">
-          {!isEditing && (meeting.participant_first_name || meeting.participant_last_name || meeting.participant_email || meeting.attachment_name) && (
+          {(meeting.participant_first_name || meeting.participant_last_name || meeting.participant_email || meeting.attachment_name) && (
             <div className="mb-8">
               <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-2xl p-6 border-2 border-orange-100">
                 <h3 className="text-xl font-bold text-cocoa-800 mb-4">Informations du participant</h3>
@@ -1122,30 +1161,25 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
 
           {activeTab === 'summary' ? (
             <div>
-              {isEditing ? null : (
-                <>
-                  {meeting.notes && (
-                    <div className="mb-8 bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-6 border-2 border-amber-200">
-                      <div className="flex items-center gap-2 mb-3">
-                        <FileText className="w-5 h-5 text-amber-600" />
-                        <h4 className="text-lg font-bold text-cocoa-800">Notes prises pendant l'enregistrement</h4>
-                      </div>
-                      <p className="text-cocoa-700 whitespace-pre-wrap leading-relaxed">
-                        {meeting.notes}
-                      </p>
-                    </div>
-                  )}
-                  <div className="prose prose-slate max-w-none">
-                    <div ref={summaryRef} className="text-cocoa-800 whitespace-pre-wrap leading-relaxed text-lg cursor-text">
-                      {renderSummaryWithBold(meeting.summary)}
-                    </div>
+              {meeting.notes && (
+                <div className="mb-8 bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-6 border-2 border-amber-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <FileText className="w-5 h-5 text-amber-600" />
+                    <h4 className="text-lg font-bold text-cocoa-800">Notes prises pendant l'enregistrement</h4>
                   </div>
-                </>
+                  <p className="text-cocoa-700 whitespace-pre-wrap leading-relaxed">
+                    {meeting.notes}
+                  </p>
+                </div>
               )}
+              <div className="prose prose-slate max-w-none">
+                <div ref={summaryRef} className="text-cocoa-800 whitespace-pre-wrap leading-relaxed text-lg cursor-text">
+                  {renderSummaryWithBold(meeting.summary)}
+                </div>
+              </div>
             </div>
           ) : activeTab === 'transcript' ? (
             <div>
-              {isEditing ? null : (
                 <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-2xl p-8 border-2 border-orange-100">
                   <div ref={transcriptRef} className="max-h-[500px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-coral-300 scrollbar-track-coral-100 cursor-text">
                     {(meeting.display_transcript || meeting.transcript) ? (
@@ -1204,7 +1238,6 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
                     )}
                   </div>
                 </div>
-              )}
             </div>
           ) : (
             <div>
@@ -1290,81 +1323,6 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
         onReplace={handleWordReplace}
         userId={meeting.user_id}
       />
-
-      {/* Modal d'édition en plein écran */}
-      {isEditing && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-coral-500 to-sunset-500 p-6 flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <Edit2 className="w-6 h-6 text-white" />
-                <h2 className="text-2xl font-bold text-white">Modification de la réunion</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleCancelEdit}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-white/20 hover:bg-white/30 text-white rounded-xl transition-colors font-semibold"
-                >
-                  <X className="w-5 h-5" />
-                  Annuler
-                </button>
-                <button
-                  onClick={handleSave}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-white text-coral-600 hover:bg-orange-50 rounded-xl transition-colors font-semibold shadow-lg"
-                >
-                  <Save className="w-5 h-5" />
-                  Enregistrer
-                </button>
-              </div>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-8 space-y-6">
-              {/* Titre */}
-              <div>
-                <label className="block text-sm font-bold text-cocoa-800 mb-2">
-                  Titre de la réunion
-                </label>
-                <input
-                  type="text"
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-coral-500 focus:border-coral-500 text-cocoa-800 text-lg font-semibold"
-                  placeholder="Titre de la réunion"
-                />
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-sm font-bold text-cocoa-800 mb-2">
-                  <FileText className="w-4 h-4 inline mr-2 text-amber-600" />
-                  Notes prises pendant l'enregistrement
-                </label>
-                <textarea
-                  value={editedNotes}
-                  onChange={(e) => setEditedNotes(e.target.value)}
-                  placeholder="Ajoutez vos notes ici..."
-                  className="w-full min-h-[100px] p-4 border-2 border-amber-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-cocoa-800 leading-relaxed bg-gradient-to-br from-amber-50 to-orange-50 resize-y"
-                />
-              </div>
-
-              {/* Résumé IA */}
-              <div className="flex-1">
-                <label className="block text-sm font-bold text-cocoa-800 mb-2">
-                  Résumé IA
-                </label>
-                <textarea
-                  value={editedSummary}
-                  onChange={(e) => setEditedSummary(e.target.value)}
-                  placeholder="Le résumé généré par l'IA apparaîtra ici..."
-                  className="w-full min-h-[500px] p-6 border-2 border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-coral-500 focus:border-coral-500 text-cocoa-800 text-lg leading-relaxed resize-y"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
     </>
   );
