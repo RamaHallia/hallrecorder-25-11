@@ -576,7 +576,10 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
                 </svg>
               )}
             </button>
-            <span className={`flex-1 ${isChecked ? 'line-through text-cocoa-400' : 'text-cocoa-800'}`}>
+            <span
+              className={`flex-1 ${isChecked ? 'line-through text-cocoa-400' : 'text-cocoa-800'}`}
+              onDoubleClick={handleWordDoubleClick}
+            >
               {content}
             </span>
           </div>
@@ -587,7 +590,11 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
       if (line.startsWith('### ')) {
         const titleText = line.substring(4).trim();
         return (
-          <h3 key={lineIndex} className="text-xl font-bold text-cocoa-800 mt-6 mb-3">
+          <h3
+            key={lineIndex}
+            className="text-xl font-bold text-cocoa-800 mt-6 mb-3"
+            onDoubleClick={handleWordDoubleClick}
+          >
             {titleText}
           </h3>
         );
@@ -596,7 +603,11 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
       if (line.startsWith('#### ')) {
         const titleText = line.substring(5).trim();
         return (
-          <h4 key={lineIndex} className="text-lg font-semibold text-cocoa-700 mt-4 mb-2">
+          <h4
+            key={lineIndex}
+            className="text-lg font-semibold text-cocoa-700 mt-4 mb-2"
+            onDoubleClick={handleWordDoubleClick}
+          >
             {titleText}
           </h4>
         );
@@ -617,7 +628,12 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
         return (
           <div key={lineIndex} className="flex items-start gap-2 mb-1">
             <span className="text-coral-600 mt-1 text-sm">•</span>
-            <span className="flex-1 text-cocoa-800">{renderedParts}</span>
+            <span
+              className="flex-1 text-cocoa-800"
+              onDoubleClick={handleWordDoubleClick}
+            >
+              {renderedParts}
+            </span>
           </div>
         );
       }
@@ -633,11 +649,16 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
           }
           return part;
         });
-        
+
         return (
           <div key={lineIndex} className="flex items-start gap-2 ml-6 mb-1">
             <span className="text-cocoa-400 mt-1 text-xs">○</span>
-            <span className="flex-1 text-cocoa-700">{renderedParts}</span>
+            <span
+              className="flex-1 text-cocoa-700"
+              onDoubleClick={handleWordDoubleClick}
+            >
+              {renderedParts}
+            </span>
           </div>
         );
       }
@@ -653,7 +674,11 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
       });
 
       return (
-        <div key={lineIndex} className={line.trim() === '' ? 'h-2' : ''}>
+        <div
+          key={lineIndex}
+          className={line.trim() === '' ? 'h-2' : ''}
+          onDoubleClick={handleWordDoubleClick}
+        >
           {renderedParts}
           {lineIndex < lines.length - 1 && '\n'}
         </div>
