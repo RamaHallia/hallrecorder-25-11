@@ -17,7 +17,6 @@ export const SubscriptionSelection = ({
 }: SubscriptionSelectionProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'starter' | 'unlimited' | null>(null);
-  const [isBusinessPayment, setIsBusinessPayment] = useState(false);
 
   const handleSubscribe = async (plan: 'starter' | 'unlimited') => {
     setIsProcessing(true);
@@ -47,8 +46,7 @@ export const SubscriptionSelection = ({
             price_id: priceIds[plan],
             success_url: `${window.location.origin}/?payment=success`,
             cancel_url: `${window.location.origin}/?payment=cancelled`,
-            mode: 'subscription',
-            tax_id_collection: isBusinessPayment
+            mode: 'subscription'
           }),
         }
       );
@@ -144,27 +142,8 @@ export const SubscriptionSelection = ({
           </div>
         </div>
 
-        {/* Business Toggle */}
-        <div className="px-3 sm:px-6 md:px-8 pt-4 sm:pt-6 md:pt-8 pb-2 sm:pb-4">
-          <div className="flex items-center justify-center gap-2 sm:gap-3 bg-gray-50 rounded-xl p-3 sm:p-4">
-            <label className="flex items-center gap-2 sm:gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isBusinessPayment}
-                onChange={(e) => setIsBusinessPayment(e.target.checked)}
-                className="w-4 h-4 sm:w-5 sm:h-5 text-coral-500 rounded focus:ring-coral-500"
-                disabled={isProcessing}
-              />
-              <div>
-                <span className="font-semibold text-cocoa-800 text-sm sm:text-base">Paiement entreprise</span>
-                <p className="text-xs text-cocoa-600">Ajouter un numéro de TVA</p>
-              </div>
-            </label>
-          </div>
-        </div>
-
         {/* Plans */}
-        <div className="p-3 sm:p-6 md:p-8 pt-2 sm:pt-4">
+        <div className="p-3 sm:p-6 md:p-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
             {plans.map((plan) => (
               <div
@@ -191,15 +170,12 @@ export const SubscriptionSelection = ({
                   <div className="flex flex-col items-center gap-1">
                     <div className="flex items-end justify-center gap-1">
                       <span className={`text-3xl sm:text-4xl md:text-5xl font-bold bg-gradient-to-r ${plan.color} bg-clip-text text-transparent`}>
-                        {isBusinessPayment ? plan.priceHT : plan.price}
+                        {plan.price}
                       </span>
                       <span className="text-cocoa-600 mb-1 sm:mb-2 text-sm sm:text-base">{plan.period}</span>
                     </div>
                     <div className="text-xs sm:text-sm text-cocoa-500">
-                      {isBusinessPayment ? 'HT' : 'TTC'}
-                      {!isBusinessPayment && (
-                        <span className="ml-1 sm:ml-2 text-xs text-cocoa-400">(TVA 20%)</span>
-                      )}
+                      TTC <span className="ml-1 sm:ml-2 text-xs text-cocoa-400">(TVA 20%)</span>
                     </div>
                   </div>
                 </div>
@@ -265,8 +241,7 @@ export const SubscriptionSelection = ({
                 <div className="flex-1 text-xs sm:text-sm text-cocoa-700">
                   <p className="font-semibold mb-1">Informations importantes :</p>
                   <ul className="space-y-1 text-xs text-cocoa-600">
-                    <li>• TVA 20% calculée automatiquement</li>
-                    <li>• Numéro TVA intracommunautaire accepté</li>
+                    <li>• TVA 20% incluse</li>
                     <li>• Factures disponibles immédiatement</li>
                     <li>• Résiliation sans frais à tout moment</li>
                   </ul>
