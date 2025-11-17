@@ -84,22 +84,10 @@ Deno.serve(async (req) => {
         }
       }
 
-      const lines = invoice.lines.data.map((line) => ({
-        id: line.id,
-        description: line.description,
-        amount: line.amount / 100,
-        quantity: line.quantity,
-        proration: line.proration,
-        period_start: line.period.start,
-        period_end: line.period.end,
-      }));
-
       return {
         id: invoice.id,
         number: invoice.number || invoice.id,
         amount: invoice.total / 100,
-        subtotal: invoice.subtotal / 100,
-        tax: invoice.tax ? invoice.tax / 100 : 0,
         currency: invoice.currency.toUpperCase(),
         status: invoice.status,
         created: invoice.created,
@@ -109,7 +97,6 @@ Deno.serve(async (req) => {
         period_start: invoice.period_start,
         period_end: invoice.period_end,
         is_proration: isProration,
-        lines: lines,
       };
     });
 
