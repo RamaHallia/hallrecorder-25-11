@@ -1,19 +1,26 @@
 import { useState, useEffect } from 'react';
-import { Save, Upload, X, Mail, BookOpen, Plus, Trash2 } from 'lucide-react';
+import { Save, Upload, X, Mail, BookOpen, Plus, Trash2, Sparkles } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { SummaryMode } from '../services/transcription';
+import { useDialog } from '../context/DialogContext';
 
 interface SettingsProps {
   userId: string;
+  onDefaultSummaryModeChange?: (mode: SummaryMode | null) => void;
 }
 
-export const Settings = ({ userId }: SettingsProps) => {
+export const Settings = ({ userId, onDefaultSummaryModeChange }: SettingsProps) => {
   const [signatureText, setSignatureText] = useState('');
   const [signatureLogoUrl, setSignatureLogoUrl] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  
+  // États de sauvegarde individuels
+  const [isSavingSummaryMode, setIsSavingSummaryMode] = useState(false);
+  const [isSavingEmailMethod, setIsSavingEmailMethod] = useState(false);
+  const [isSavingSignature, setIsSavingSignature] = useState(false);
   const [emailMethod, setEmailMethod] = useState<'gmail' | 'local' | 'smtp'>('gmail');
   const [smtpHost, setSmtpHost] = useState('');
   const [smtpPort, setSmtpPort] = useState(587);
@@ -32,6 +39,7 @@ export const Settings = ({ userId }: SettingsProps) => {
   const [newIncorrectWord, setNewIncorrectWord] = useState('');
   const [newCorrectWord, setNewCorrectWord] = useState('');
 
+  const [defaultSummaryMode, setDefaultSummaryMode] = useState<SummaryMode | ''>('');
   // Contact Groups
   const [contactGroups, setContactGroups] = useState<Array<{ id: string; name: string; description: string; contacts: Array<{ id: string; name: string; email: string }> }>>([]);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
@@ -39,6 +47,7 @@ export const Settings = ({ userId }: SettingsProps) => {
   const [newGroupDescription, setNewGroupDescription] = useState('');
   const [newContactName, setNewContactName] = useState('');
   const [newContactEmail, setNewContactEmail] = useState('');
+  const { showAlert, showConfirm } = useDialog();
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
 
   useEffect(() => {
@@ -47,7 +56,7 @@ export const Settings = ({ userId }: SettingsProps) => {
     loadContactGroups();
 
     // Écouter les messages de la popup OAuth
-    const handleMessage = (event: MessageEvent) => {
+    const handleMessage = async (event: MessageEvent) => {
       if (event.data.type === 'GMAIL_AUTH_SUCCESS') {
         console.log('✅ Gmail connecté !', event.data.email);
         setGmailConnected(true);
@@ -56,7 +65,11 @@ export const Settings = ({ userId }: SettingsProps) => {
         loadSettings();
       } else if (event.data.type === 'GMAIL_AUTH_ERROR') {
         console.error('❌ Erreur Gmail:', event.data.error);
-        alert(`Erreur de connexion Gmail : ${event.data.error}`);
+        await showAlert({
+          title: 'Erreur de connexion Gmail',
+          message: `Erreur de connexion Gmail : ${event.data.error}`,
+          variant: 'danger',
+        });
       }
     };
 
@@ -65,12 +78,12 @@ export const Settings = ({ userId }: SettingsProps) => {
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [userId]);
+  }, [userId, showAlert]);
 
   const loadSettings = async () => {
     const { data, error } = await supabase
       .from('user_settings')
-      .select('signature_text, signature_logo_url, email_method, smtp_host, smtp_port, smtp_user, smtp_password_encrypted, smtp_secure, gmail_connected, gmail_email')
+      .select('signature_text, signature_logo_url, email_method, smtp_host, smtp_port, smtp_user, smtp_password_encrypted, smtp_secure, gmail_connected, gmail_email, default_summary_mode')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -96,6 +109,9 @@ export const Settings = ({ userId }: SettingsProps) => {
       setSmtpSecure(data.smtp_secure !== false);
       setGmailConnected(data.gmail_connected || false);
       setGmailEmail(data.gmail_email || '');
+      const loadedDefaultMode = (data.default_summary_mode as SummaryMode | null) || null;
+      setDefaultSummaryMode(loadedDefaultMode || '');
+      onDefaultSummaryModeChange?.(loadedDefaultMode);
     }
   };
 
@@ -113,7 +129,11 @@ export const Settings = ({ userId }: SettingsProps) => {
 
   const handleAddWord = async () => {
     if (!newIncorrectWord.trim() || !newCorrectWord.trim()) {
-      alert('Veuillez remplir les deux champs');
+      await showAlert({
+        title: 'Champs requis',
+        message: 'Veuillez remplir les deux champs',
+        variant: 'warning',
+      });
       return;
     }
 
@@ -129,7 +149,11 @@ export const Settings = ({ userId }: SettingsProps) => {
       });
 
     if (error) {
-      alert('Erreur lors de l\'ajout du mot');
+      await showAlert({
+        title: 'Erreur du dictionnaire',
+        message: 'Erreur lors de l\'ajout du mot',
+        variant: 'danger',
+      });
       console.error(error);
       return;
     }
@@ -146,7 +170,11 @@ export const Settings = ({ userId }: SettingsProps) => {
       .eq('id', id);
 
     if (error) {
-      alert('Erreur lors de la suppression');
+      await showAlert({
+        title: 'Erreur du dictionnaire',
+        message: 'Erreur lors de la suppression',
+        variant: 'danger',
+      });
       console.error(error);
       return;
     }
@@ -191,7 +219,11 @@ export const Settings = ({ userId }: SettingsProps) => {
 
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) {
-      alert('Veuillez entrer un nom de groupe');
+      await showAlert({
+        title: 'Nom requis',
+        message: 'Veuillez entrer un nom de groupe',
+        variant: 'warning',
+      });
       return;
     }
 
@@ -206,7 +238,11 @@ export const Settings = ({ userId }: SettingsProps) => {
       .single();
 
     if (error) {
-      alert('Erreur lors de la création du groupe');
+      await showAlert({
+        title: 'Erreur groupe',
+        message: 'Erreur lors de la création du groupe',
+        variant: 'danger',
+      });
       console.error(error);
       return;
     }
@@ -218,7 +254,13 @@ export const Settings = ({ userId }: SettingsProps) => {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    if (!confirm('Voulez-vous vraiment supprimer ce groupe et tous ses contacts ?')) {
+    const confirmed = await showConfirm({
+      title: 'Supprimer le groupe',
+      message: 'Voulez-vous vraiment supprimer ce groupe et tous ses contacts ?',
+      confirmLabel: 'Supprimer',
+      variant: 'warning',
+    });
+    if (!confirmed) {
       return;
     }
 
@@ -228,7 +270,11 @@ export const Settings = ({ userId }: SettingsProps) => {
       .eq('id', groupId);
 
     if (error) {
-      alert('Erreur lors de la suppression du groupe');
+      await showAlert({
+        title: 'Erreur groupe',
+        message: 'Erreur lors de la suppression du groupe',
+        variant: 'danger',
+      });
       console.error(error);
       return;
     }
@@ -242,7 +288,11 @@ export const Settings = ({ userId }: SettingsProps) => {
 
   const handleAddContact = async (groupId: string) => {
     if (!newContactEmail.trim()) {
-      alert('Veuillez entrer une adresse email');
+      await showAlert({
+        title: 'Email requis',
+        message: 'Veuillez entrer une adresse email',
+        variant: 'warning',
+      });
       return;
     }
 
@@ -255,7 +305,11 @@ export const Settings = ({ userId }: SettingsProps) => {
       });
 
     if (error) {
-      alert('Erreur lors de l\'ajout du contact');
+      await showAlert({
+        title: 'Erreur contact',
+        message: 'Erreur lors de l\'ajout du contact',
+        variant: 'danger',
+      });
       console.error(error);
       return;
     }
@@ -272,7 +326,11 @@ export const Settings = ({ userId }: SettingsProps) => {
       .eq('id', contactId);
 
     if (error) {
-      alert('Erreur lors de la suppression du contact');
+      await showAlert({
+        title: 'Erreur contact',
+        message: 'Erreur lors de la suppression du contact',
+        variant: 'danger',
+      });
       console.error(error);
       return;
     }
@@ -280,21 +338,29 @@ export const Settings = ({ userId }: SettingsProps) => {
     await loadContactGroups();
   };
 
-  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       // Vérifier le type de fichier
       const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
       
       if (!validTypes.includes(file.type)) {
-        alert('❌ Format non supporté.\n\nFormats acceptés : PNG, JPG, GIF, WebP, SVG');
+        await showAlert({
+          title: 'Format non supporté',
+          message: '❌ Format non supporté.\n\nFormats acceptés : PNG, JPG, GIF, WebP, SVG',
+          variant: 'warning',
+        });
         return;
       }
 
       // Vérifier la taille (max 2MB)
       const maxSize = 2 * 1024 * 1024; // 2MB
       if (file.size > maxSize) {
-        alert('❌ Fichier trop volumineux.\n\nTaille maximale : 2 MB');
+        await showAlert({
+          title: 'Fichier trop volumineux',
+          message: '❌ Fichier trop volumineux.\n\nTaille maximale : 2 MB',
+          variant: 'warning',
+        });
         return;
       }
 
@@ -306,9 +372,13 @@ export const Settings = ({ userId }: SettingsProps) => {
         setLogoPreview(reader.result as string);
         console.log('✅ Aperçu du logo généré');
       };
-      reader.onerror = () => {
+      reader.onerror = async () => {
         console.error('❌ Erreur lecture fichier');
-        alert('❌ Erreur lors de la lecture du fichier');
+        await showAlert({
+          title: 'Erreur lecture fichier',
+          message: '❌ Erreur lors de la lecture du fichier',
+          variant: 'danger',
+        });
       };
       reader.readAsDataURL(file);
     }
@@ -406,7 +476,11 @@ export const Settings = ({ userId }: SettingsProps) => {
       return publicUrl;
     } catch (error: any) {
       console.error('Error uploading logo:', error);
-      alert(`Erreur lors du téléchargement du logo: ${error.message || 'Erreur inconnue'}`);
+      await showAlert({
+        title: 'Erreur upload logo',
+        message: `Erreur lors du téléchargement du logo: ${error.message || 'Erreur inconnue'}`,
+        variant: 'danger',
+      });
       return null;
     } finally {
       setIsUploading(false);
@@ -430,11 +504,16 @@ export const Settings = ({ userId }: SettingsProps) => {
 
       // Si le mot de passe n'a pas été modifié, demander à l'utilisateur
       if (!isPasswordModified && hasExistingPassword) {
-        const shouldUseExisting = confirm(
-          'Voulez-vous tester avec le mot de passe déjà enregistré ?\n\n' +
-          'OK = Utiliser le mot de passe enregistré\n' +
-          'Annuler = Saisir un nouveau mot de passe'
-        );
+        const shouldUseExisting = await showConfirm({
+          title: 'Mot de passe déjà enregistré',
+          message:
+            'Voulez-vous tester avec le mot de passe déjà enregistré ?\n\n' +
+            'OK = Utiliser le mot de passe enregistré\n' +
+            'Annuler = Saisir un nouveau mot de passe',
+          confirmLabel: 'Utiliser le mot de passe',
+          cancelLabel: 'Saisir un nouveau',
+          variant: 'info',
+        });
 
         if (!shouldUseExisting) {
           setSmtpTestResult({
@@ -500,22 +579,47 @@ export const Settings = ({ userId }: SettingsProps) => {
     }
   };
 
-  const handleSave = async () => {
-    setIsSaving(true);
+  // Fonctions de sauvegarde individuelles
+  const handleSaveSummaryMode = async () => {
+    setIsSavingSummaryMode(true);
     try {
-      let finalLogoUrl = signatureLogoUrl;
+      const { error } = await supabase
+        .from('user_settings')
+        .upsert({
+          user_id: userId,
+          default_summary_mode: defaultSummaryMode || null,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id'
+        });
 
-      if (logoFile) {
-        const uploadedUrl = await uploadLogo();
-        if (uploadedUrl) {
-          finalLogoUrl = uploadedUrl;
-        }
-      }
+      if (error) throw error;
 
+      onDefaultSummaryModeChange?.(defaultSummaryMode ? (defaultSummaryMode as SummaryMode) : null);
+      
+      await showAlert({
+        title: 'Sauvegardé !',
+        message: 'Le mode de résumé par défaut a été enregistré',
+        variant: 'success',
+      });
+    } catch (error) {
+      console.error('Erreur:', error);
+      await showAlert({
+        title: 'Erreur',
+        message: 'Erreur lors de la sauvegarde du mode de résumé',
+        variant: 'danger',
+      });
+    } finally {
+      setIsSavingSummaryMode(false);
+    }
+  };
+
+  const handleSaveEmailMethod = async () => {
+    setIsSavingEmailMethod(true);
+    try {
       // Chiffrer le mot de passe SMTP si modifié
       let passwordUpdate = {};
       
-      // Seulement si le mot de passe a été modifié et n'est pas le placeholder
       if (isPasswordModified && smtpPassword && smtpPassword.trim() !== '' && smtpPassword !== '••••••••••••') {
         console.log('🔐 Chiffrement du nouveau mot de passe SMTP...');
         
@@ -532,13 +636,58 @@ export const Settings = ({ userId }: SettingsProps) => {
 
         passwordUpdate = {
           smtp_password_encrypted: encryptedPassword,
-          smtp_password: null // Supprimer l'ancien mot de passe en clair
+          smtp_password: null
         };
         
         console.log('✅ Mot de passe SMTP chiffré avec succès');
-      } else if (!isPasswordModified && hasExistingPassword) {
-        console.log('ℹ️ Mot de passe existant conservé (non modifié)');
-        // Ne pas toucher au mot de passe existant
+      }
+
+      const { error } = await supabase
+        .from('user_settings')
+        .upsert({
+          user_id: userId,
+          email_method: emailMethod,
+          smtp_host: smtpHost || null,
+          smtp_port: smtpPort || null,
+          smtp_user: smtpUser || null,
+          ...passwordUpdate,
+          smtp_secure: smtpSecure,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id'
+        });
+
+      if (error) throw error;
+
+      await loadSettings();
+      
+      await showAlert({
+        title: 'Sauvegardé !',
+        message: 'La méthode d\'envoi email a été enregistrée',
+        variant: 'success',
+      });
+    } catch (error) {
+      console.error('Erreur:', error);
+      await showAlert({
+        title: 'Erreur',
+        message: 'Erreur lors de la sauvegarde de la méthode d\'envoi',
+        variant: 'danger',
+      });
+    } finally {
+      setIsSavingEmailMethod(false);
+    }
+  };
+
+  const handleSaveSignature = async () => {
+    setIsSavingSignature(true);
+    try {
+      let finalLogoUrl = signatureLogoUrl;
+
+      if (logoFile) {
+        const uploadedUrl = await uploadLogo();
+        if (uploadedUrl) {
+          finalLogoUrl = uploadedUrl;
+        }
       }
 
       const { error } = await supabase
@@ -547,13 +696,6 @@ export const Settings = ({ userId }: SettingsProps) => {
           user_id: userId,
           signature_text: signatureText,
           signature_logo_url: finalLogoUrl,
-          email_method: emailMethod,
-          // Toujours sauvegarder les paramètres SMTP même si la méthode n'est pas SMTP
-          smtp_host: smtpHost || null,
-          smtp_port: smtpPort || null,
-          smtp_user: smtpUser || null,
-          ...passwordUpdate, // Ajouter le mot de passe chiffré si fourni
-          smtp_secure: smtpSecure,
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'user_id'
@@ -565,17 +707,20 @@ export const Settings = ({ userId }: SettingsProps) => {
       setLogoPreview(finalLogoUrl);
       setLogoFile(null);
 
-      // Recharger les settings pour afficher le nouveau placeholder
-      await loadSettings();
-
-      // Afficher le message de succès
-      setShowSaveSuccess(true);
-      setTimeout(() => setShowSaveSuccess(false), 5000);
+      await showAlert({
+        title: 'Sauvegardé !',
+        message: 'La signature email a été enregistrée',
+        variant: 'success',
+      });
     } catch (error) {
       console.error('Erreur:', error);
-      alert('Erreur lors de la sauvegarde des paramètres');
+      await showAlert({
+        title: 'Erreur',
+        message: 'Erreur lors de la sauvegarde de la signature',
+        variant: 'danger',
+      });
     } finally {
-      setIsSaving(false);
+      setIsSavingSignature(false);
     }
   };
 
@@ -612,12 +757,102 @@ export const Settings = ({ userId }: SettingsProps) => {
         )}
 
       <div className="space-y-6">
-        {/* Choix de la méthode d'envoi email */}
+        {/* Résumé par défaut */}
         <div className="bg-white rounded-2xl shadow-lg border-2 border-coral-200 p-6 animate-fadeInUp delay-200">
-          <h3 className="text-xl font-bold text-cocoa-900 mb-4">Méthode d'envoi email</h3>
-          <p className="text-sm text-cocoa-600 mb-4">
-            Choisissez comment vous souhaitez envoyer vos emails de compte-rendu
-          </p>
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
+            <div>
+              <h3 className="text-xl font-bold text-cocoa-900 mb-1">Mode de résumé par défaut</h3>
+              <p className="text-sm text-cocoa-600">
+                Choisissez la version générée automatiquement quand l&apos;enregistrement s&apos;arrête.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {!defaultSummaryMode && (
+                <span className="px-3 py-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold">
+                  Aucun mode sélectionné
+                </span>
+              )}
+              <button
+                onClick={handleSaveSummaryMode}
+                disabled={isSavingSummaryMode}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold hover:from-coral-600 hover:to-sunset-600 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSavingSummaryMode ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span className="text-sm">Sauvegarde...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span className="text-sm">Sauvegarder</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+            <button
+              type="button"
+              onClick={() => setDefaultSummaryMode('detailed')}
+              className={`text-left p-5 rounded-2xl border-2 transition-all ${defaultSummaryMode === 'detailed'
+                ? 'border-coral-400 bg-gradient-to-br from-coral-50 to-orange-50 shadow-lg'
+                : 'border-cocoa-100 bg-white hover:border-coral-200'}`}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <Sparkles className="w-5 h-5 text-coral-500" />
+                <span className="font-semibold text-cocoa-900">Résumé détaillé</span>
+              </div>
+              <p className="text-sm text-cocoa-600">
+                Compte-rendu complet avec tous les détails importants de votre réunion.
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDefaultSummaryMode('short')}
+              className={`text-left p-5 rounded-2xl border-2 transition-all ${defaultSummaryMode === 'short'
+                ? 'border-orange-400 bg-gradient-to-br from-orange-50 to-amber-50 shadow-lg'
+                : 'border-cocoa-100 bg-white hover:border-orange-200'}`}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <Sparkles className="w-5 h-5 text-orange-500" />
+                <span className="font-semibold text-cocoa-900">Résumé court</span>
+              </div>
+              <p className="text-sm text-cocoa-600">
+                L'essentiel en quelques lignes, parfait pour les réunions courtes ou un aperçu rapide.
+              </p>
+            </button>
+          </div>
+        </div>
+
+        {/* Choix de la méthode d'envoi email */}
+        <div className="bg-white rounded-2xl shadow-lg border-2 border-coral-200 p-6 animate-fadeInUp delay-300">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <div>
+              <h3 className="text-xl font-bold text-cocoa-900 mb-1">Méthode d'envoi email</h3>
+              <p className="text-sm text-cocoa-600">
+                Choisissez comment vous souhaitez envoyer vos emails de compte-rendu
+              </p>
+            </div>
+            <button
+              onClick={handleSaveEmailMethod}
+              disabled={isSavingEmailMethod}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold hover:from-coral-600 hover:to-sunset-600 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSavingEmailMethod ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span className="text-sm">Sauvegarde...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span className="text-sm">Sauvegarder</span>
+                </>
+              )}
+            </button>
+          </div>
           
           <div className="space-y-3">
             <label className="flex items-start gap-3 p-4 bg-gradient-to-br from-peach-50 to-coral-50 rounded-xl border-2 border-coral-200 cursor-pointer hover:border-coral-300 transition-all">
@@ -694,7 +929,7 @@ export const Settings = ({ userId }: SettingsProps) => {
             </label>
           </div>
 
-          {/* Formulaire de configuration SMTP */}
+          {/* Configuration Gmail */}
           {emailMethod === 'gmail' && !gmailConnected && (
             <div className="mt-4 p-5 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border-2 border-blue-200 space-y-4">
               <div className="flex items-center gap-3">
@@ -732,7 +967,11 @@ export const Settings = ({ userId }: SettingsProps) => {
                     window.open(authUrl, '_blank', 'width=500,height=600');
                   } catch (error) {
                     console.error('Erreur lors de la connexion Gmail:', error);
-                    alert('Erreur lors de la connexion Gmail');
+                    await showAlert({
+                      title: 'Erreur de connexion Gmail',
+                      message: 'Erreur lors de la connexion Gmail',
+                      variant: 'danger',
+                    });
                   } finally {
                     setIsConnectingGmail(false);
                   }
@@ -770,22 +1009,32 @@ export const Settings = ({ userId }: SettingsProps) => {
               </p>
               <button
                 onClick={async () => {
-                  if (confirm('Voulez-vous vraiment déconnecter votre compte Gmail ?')) {
-                    await supabase
-                      .from('user_settings')
-                      .update({
-                        gmail_connected: false,
-                        gmail_email: null,
-                        gmail_access_token: null,
-                        gmail_refresh_token: null,
-                        gmail_token_expiry: null,
-                      })
-                      .eq('user_id', userId);
+                  const confirmed = await showConfirm({
+                    title: 'Déconnecter Gmail',
+                    message: 'Voulez-vous vraiment déconnecter votre compte Gmail ?',
+                    confirmLabel: 'Déconnecter',
+                    variant: 'warning',
+                  });
+                  if (!confirmed) return;
 
-                    setGmailConnected(false);
-                    setGmailEmail('');
-                    alert('Compte Gmail déconnecté');
-                  }
+                  await supabase
+                    .from('user_settings')
+                    .update({
+                      gmail_connected: false,
+                      gmail_email: null,
+                      gmail_access_token: null,
+                      gmail_refresh_token: null,
+                      gmail_token_expiry: null,
+                    })
+                    .eq('user_id', userId);
+
+                  setGmailConnected(false);
+                  setGmailEmail('');
+                  await showAlert({
+                    title: 'Gmail déconnecté',
+                    message: 'Compte Gmail déconnecté',
+                    variant: 'info',
+                  });
                 }}
                 className="px-4 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-all text-sm"
               >
@@ -973,10 +1222,31 @@ export const Settings = ({ userId }: SettingsProps) => {
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg border-2 border-coral-200 p-6 animate-fadeInUp delay-300">
-          <h3 className="text-xl font-bold text-cocoa-900 mb-6">Signature Email</h3>
-          <p className="text-sm text-cocoa-600 mb-4">
-            Cette signature sera ajoutée automatiquement en bas de tous les emails de compte-rendu
-          </p>
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <div>
+              <h3 className="text-xl font-bold text-cocoa-900 mb-1">Signature Email</h3>
+              <p className="text-sm text-cocoa-600">
+                Cette signature sera ajoutée automatiquement en bas de tous les emails de compte-rendu
+              </p>
+            </div>
+            <button
+              onClick={handleSaveSignature}
+              disabled={isSavingSignature}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl font-semibold hover:from-coral-600 hover:to-sunset-600 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSavingSignature ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span className="text-sm">Sauvegarde...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span className="text-sm">Sauvegarder</span>
+                </>
+              )}
+            </button>
+          </div>
 
           <div className="space-y-4">
             <div>
@@ -1319,16 +1589,6 @@ export const Settings = ({ userId }: SettingsProps) => {
             )}
           </div>
         </div>
-
-        <button
-          onClick={handleSave}
-          disabled={isSaving || isUploading}
-          className="group relative flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-coral-500 to-sunset-500 text-white rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 overflow-hidden animate-fadeInUp delay-500"
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-          <Save className="relative w-5 h-5" />
-          <span className="relative">{isUploading ? 'Téléchargement...' : isSaving ? 'Sauvegarde...' : 'Sauvegarder'}</span>
-        </button>
       </div>
       </div>
     </div>

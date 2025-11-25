@@ -28,6 +28,11 @@ export interface Meeting {
   transcript: string | null;
   display_transcript: string | null;
   summary: string | null;
+  summary_short: string | null;
+  summary_detailed: string | null;
+  summary_mode?: 'short' | 'detailed';
+  summary_regenerated?: boolean;
+  summary_failed?: boolean;
   duration: number;
   created_at: string;
   user_id: string;

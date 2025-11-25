@@ -1,8 +1,13 @@
-import { Calendar, Clock, FileText, Trash2, Loader2, Search, X, Mail, Edit2, Check, ChevronLeft, ChevronRight, Send, PlusCircle, Tag, FolderPlus, List, LayoutGrid } from 'lucide-react';
+import { Calendar, Clock, FileText, Trash2, Loader2, Search, X, Mail, Edit2, Check, ChevronLeft, ChevronRight, Send, PlusCircle, Tag, FolderPlus, List, LayoutGrid, Sparkles } from 'lucide-react';
 import { Meeting, MeetingCategory } from '../lib/supabase';
 import { useState, useMemo, useEffect, useRef, useCallback, CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { ConfirmModal } from './ConfirmModal';
+import { generateSummary } from '../services/transcription';
+import { SummaryRegenerationModal } from './SummaryRegenerationModal';
+import { SummaryMode } from '../services/transcription';
+import { useDialog } from '../context/DialogContext';
+import { HexColorPicker } from 'react-colorful';
 
 interface MeetingHistoryProps {
   meetings: Meeting[];
@@ -11,13 +16,25 @@ interface MeetingHistoryProps {
   onSendEmail: (meeting: Meeting) => void;
   onUpdateMeetings: () => void;
   isLoading?: boolean;
+  isRefreshing?: boolean;
   userId?: string;
 }
 
 const ITEMS_PER_PAGE_LIST = 10;
 const ITEMS_PER_PAGE_GRID = 12;
 
-export const MeetingHistory = ({ meetings = [], onDelete, onView, onSendEmail, onUpdateMeetings, isLoading = false, userId }: MeetingHistoryProps) => {
+export const MeetingHistory = ({
+  meetings = [],
+  onDelete,
+  onView,
+  onSendEmail,
+  onUpdateMeetings,
+  isLoading = false,
+  isRefreshing = false,
+  userId
+}: MeetingHistoryProps) => {
+  // Debug: Log meetings received
+  console.log('📋 MeetingHistory: Received meetings:', meetings.length, 'first:', meetings[0]?.title, 'created_at:', meetings[0]?.created_at);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>(() => {
     const saved = localStorage.getItem('meetingViewMode');
     return (saved as 'list' | 'grid') || 'list';
@@ -37,6 +54,7 @@ export const MeetingHistory = ({ meetings = [], onDelete, onView, onSendEmail, o
   });
   const [sentMeetingIds, setSentMeetingIds] = useState<Set<string>>(new Set());
   const previousFiltersRef = useRef({ searchTitle: '', searchDate: '', categoryId: 'all' });
+  const previousMeetingsLengthRef = useRef(meetings.length);
   const [categories, setCategories] = useState<MeetingCategory[]>([]);
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
@@ -48,9 +66,30 @@ export const MeetingHistory = ({ meetings = [], onDelete, onView, onSendEmail, o
   const [draggedMeetingId, setDraggedMeetingId] = useState<string | null>(null);
   const [dropHighlightCategoryId, setDropHighlightCategoryId] = useState<string | 'all' | null>(null);
   const dragPreviewRef = useRef<HTMLDivElement | null>(null);
-  const [newCategoryColor, setNewCategoryColor] = useState<string>('#F97316');
+  const [newCategoryColor, setNewCategoryColor] = useState<string>('#6366F1');
+  const [regenerationTarget, setRegenerationTarget] = useState<Meeting | null>(null);
+  const [regenerationTargetMode, setRegenerationTargetMode] = useState<SummaryMode>('detailed');
+  const [showRegenerationModal, setShowRegenerationModal] = useState(false);
+  const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
+  const [regenerationError, setRegenerationError] = useState<string | null>(null);
+  const [regenerationToast, setRegenerationToast] = useState<{ message: string; mode: SummaryMode } | null>(null);
 
-  const colorPalette = ['#F97316', '#EC4899', '#6366F1', '#10B981', '#FACC15', '#0EA5E9', '#F97373', '#8B5CF6', '#FB923C', '#14B8A6'];
+  // Palette de couleurs professionnelle et douce (style Notion/Linear)
+  const colorPalette = [
+    '#64748B', // Slate - Gris neutre
+    '#6366F1', // Indigo - Bleu violet professionnel
+    '#8B5CF6', // Violet - Doux
+    '#EC4899', // Rose - Subtil
+    '#EF4444', // Rouge - Attention
+    '#F97316', // Orange - Energie
+    '#EAB308', // Jaune - Moutarde
+    '#22C55E', // Vert - Succès
+    '#14B8A6', // Teal - Turquoise
+    '#0EA5E9', // Bleu ciel
+    '#6B7280', // Gris - Neutre foncé
+    '#A855F7', // Purple - Créatif
+  ];
+  const { showAlert, showConfirm } = useDialog();
 
   // Générer une couleur de vignette basée sur la catégorie ou l'ID de la réunion
   const getThumbnailGradient = (meeting: Meeting) => {
@@ -254,7 +293,12 @@ const previewBaseScale = 0.22;
 
   const handleDeleteCategory = async (categoryId: string) => {
     if (!userId) return;
-    const confirmed = window.confirm('Supprimer cette catégorie ? Les réunions associées ne seront pas supprimées.');
+    const confirmed = await showConfirm({
+      title: 'Supprimer cette catégorie',
+      message: 'Supprimer cette catégorie ? Les réunions associées ne seront pas supprimées.',
+      confirmLabel: 'Supprimer',
+      variant: 'warning',
+    });
     if (!confirmed) return;
 
     try {
@@ -274,7 +318,11 @@ const previewBaseScale = 0.22;
       await onUpdateMeetings();
     } catch (error: any) {
       console.error('Erreur suppression catégorie:', error);
-      alert('Erreur lors de la suppression de la catégorie');
+      await showAlert({
+        title: 'Erreur suppression',
+        message: 'Erreur lors de la suppression de la catégorie',
+        variant: 'danger',
+      });
     }
   };
 
@@ -291,7 +339,11 @@ const previewBaseScale = 0.22;
       await onUpdateMeetings();
     } catch (error: any) {
       console.error('Erreur lors de l\'assignation de la catégorie:', error);
-      alert('Erreur lors de l\'assignation de la catégorie');
+      await showAlert({
+        title: 'Erreur',
+        message: 'Erreur lors de l\'assignation de la catégorie',
+        variant: 'danger',
+      });
     }
   };
 
@@ -444,7 +496,11 @@ const previewBaseScale = 0.22;
       await onUpdateMeetings();
     } catch (error: any) {
       console.error('Erreur mise à jour couleur:', error);
-      alert('Erreur lors de la mise à jour de la couleur');
+      await showAlert({
+        title: 'Erreur lors de la mise à jour',
+        message: 'Erreur lors de la mise à jour de la couleur',
+        variant: 'danger',
+      });
     }
   };
 
@@ -496,9 +552,12 @@ const previewBaseScale = 0.22;
   }, [meetings]);
 
   const filteredMeetings = useMemo(() => {
-    if (!meetings || !Array.isArray(meetings)) return [];
+    if (!meetings || !Array.isArray(meetings)) {
+      console.log('📋 MeetingHistory filteredMeetings: No meetings array');
+      return [];
+    }
 
-    return meetings.filter((meeting) => {
+    const filtered = meetings.filter((meeting) => {
       if (!meeting) return false;
 
       const normalizedSearchTitle = searchTitle.trim().toLowerCase();
@@ -519,6 +578,9 @@ const previewBaseScale = 0.22;
 
       return matchesTitle && matchesDate && matchesCategory;
     });
+
+    console.log('📋 MeetingHistory filteredMeetings:', filtered.length, 'from', meetings.length, 'filters:', { searchTitle, searchDate, selectedCategoryId });
+    return filtered;
   }, [meetings, searchTitle, searchDate, selectedCategoryId]);
 
   // Pagination - nombre d'items selon le mode de vue
@@ -535,6 +597,9 @@ const previewBaseScale = 0.22;
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const paginatedMeetings = filteredMeetings.slice(startIndex, endIndex);
+
+  // Debug: Log pagination state
+  console.log('📄 MeetingHistory PAGINATION: page', currentPage, '/', totalPages, 'showing', paginatedMeetings.length, 'first displayed:', paginatedMeetings[0]?.title);
 
   const paginationRange = useMemo(() => {
     if (totalPages <= 1) {
@@ -578,25 +643,46 @@ const previewBaseScale = 0.22;
   // Reset page quand les filtres changent RÉELLEMENT (pas au montage/remontage)
   useEffect(() => {
     const previousFilters = previousFiltersRef.current;
-    const filtersChanged = 
-      previousFilters.searchTitle !== searchTitle || 
+    const filtersChanged =
+      previousFilters.searchTitle !== searchTitle ||
       previousFilters.searchDate !== searchDate ||
       previousFilters.categoryId !== selectedCategoryId;
-    
-    const isInitializing = previousFilters.searchTitle === '' && 
+
+    const isInitializing = previousFilters.searchTitle === '' &&
                           previousFilters.searchDate === '' &&
                           previousFilters.categoryId === 'all' &&
-                          searchTitle === '' && 
+                          searchTitle === '' &&
                           searchDate === '' &&
                           selectedCategoryId === 'all';
-    
+
     if (filtersChanged && !isInitializing) {
       console.log('🔄 MeetingHistory: Filtres RÉELLEMENT changés, reset à page 1');
       setCurrentPage(1);
     }
-    
+
     previousFiltersRef.current = { searchTitle, searchDate, categoryId: selectedCategoryId };
   }, [searchTitle, searchDate, selectedCategoryId]);
+
+  // Reset page à 1 quand les données changent (synchronisation avec la sidebar)
+  const previousFirstMeetingIdRef = useRef(meetings[0]?.id);
+  useEffect(() => {
+    const previousLength = previousMeetingsLengthRef.current;
+    const currentLength = meetings.length;
+    const previousFirstId = previousFirstMeetingIdRef.current;
+    const currentFirstId = meetings[0]?.id;
+
+    // Si de nouvelles réunions ont été ajoutées OU si la première réunion a changé, retourner à la page 1
+    const lengthChanged = currentLength !== previousLength && previousLength > 0;
+    const firstMeetingChanged = currentFirstId !== previousFirstId && previousFirstId !== undefined;
+
+    if (lengthChanged || firstMeetingChanged) {
+      console.log('🔄 MeetingHistory: Données changées, reset à page 1', { lengthChanged, firstMeetingChanged, currentFirstId, previousFirstId });
+      setCurrentPage(1);
+    }
+
+    previousMeetingsLengthRef.current = currentLength;
+    previousFirstMeetingIdRef.current = currentFirstId;
+  }, [meetings.length, meetings[0]?.id]);
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('fr-FR', {
@@ -614,6 +700,35 @@ const previewBaseScale = 0.22;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const getSummaryBadge = (meeting: Meeting) => {
+    const mode = (meeting.summary_mode as SummaryMode) ?? 'detailed';
+    if (meeting.summary_regenerated) {
+      return {
+        label: `Résumé ${mode === 'short' ? 'court' : 'détaillé'} (régénéré)`,
+        className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      };
+    }
+    if (mode === 'short') {
+      return {
+        label: 'Résumé court',
+        className: 'bg-orange-100 text-orange-700 border-orange-200',
+      };
+    }
+    return {
+      label: 'Résumé détaillé',
+      className: 'bg-green-100 text-green-700 border-green-200',
+    };
+  };
+
+  const canRegenerateSummary = (meeting: Meeting) => {
+    return !meeting.summary_regenerated;
+  };
+
+  const getTargetMode = (meeting: Meeting): SummaryMode => {
+    const current = (meeting.summary_mode as SummaryMode) ?? 'detailed';
+    return current === 'short' ? 'detailed' : 'short';
+  };
+
   const handleEditTitle = (meeting: Meeting) => {
     setEditingId(meeting.id);
     setEditedTitle(meeting.title);
@@ -621,7 +736,11 @@ const previewBaseScale = 0.22;
 
   const handleSaveTitle = async (meetingId: string) => {
     if (!editedTitle.trim()) {
-      alert('Le titre ne peut pas être vide');
+      await showAlert({
+        title: 'Validation',
+        message: 'Le titre ne peut pas être vide',
+        variant: 'warning',
+      });
       return;
     }
 
@@ -637,10 +756,94 @@ const previewBaseScale = 0.22;
       onUpdateMeetings(); // Recharger les réunions
     } catch (error) {
       console.error('Erreur lors de la mise à jour:', error);
-      alert('Erreur lors de la mise à jour du titre');
+      await showAlert({
+        title: 'Erreur lors de la mise à jour',
+        message: 'Erreur lors de la mise à jour du titre',
+        variant: 'danger',
+      });
     }
   };
 
+  const openRegenerationModal = (meeting: Meeting) => {
+    setRegenerationTarget(meeting);
+    setRegenerationTargetMode(getTargetMode(meeting));
+    setRegenerationError(null);
+    setShowRegenerationModal(true);
+  };
+
+  const closeRegenerationModal = () => {
+    if (isRegeneratingSummary) return;
+    setShowRegenerationModal(false);
+    setRegenerationTarget(null);
+    setRegenerationError(null);
+  };
+
+  const handleConfirmRegeneration = async () => {
+    if (!regenerationTarget) return;
+    setIsRegeneratingSummary(true);
+    setRegenerationError(null);
+
+    try {
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('id, transcript, summary_mode, summary_regenerated, user_id, title')
+        .eq('id', regenerationTarget.id)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) {
+        throw new Error('Réunion introuvable.');
+      }
+
+      if (!data.transcript || data.transcript.trim().length === 0) {
+        throw new Error('La transcription complète est introuvable pour cette réunion.');
+      }
+
+      if (data.summary_regenerated) {
+        throw new Error('Le résumé a déjà été régénéré pour cette réunion.');
+      }
+
+      const targetMode = regenerationTargetMode || 'detailed';
+
+      const [detailedResult, shortResult] = await Promise.all([
+        generateSummary(data.transcript, data.user_id, 0, 'detailed'),
+        generateSummary(data.transcript, data.user_id, 0, 'short'),
+      ]);
+
+      const detailedSummary = detailedResult.summary || '';
+      const shortSummary = shortResult.summary || '';
+      const finalTitle = detailedResult.title?.trim() || shortResult.title?.trim() || regenerationTarget.title;
+
+      const { error: updateError } = await supabase
+        .from('meetings')
+        .update({
+          title: finalTitle,
+          summary: targetMode === 'short' ? shortSummary : detailedSummary,
+          summary_detailed: detailedSummary,
+          summary_short: shortSummary,
+          summary_mode: targetMode,
+          summary_regenerated: true,
+        })
+        .eq('id', regenerationTarget.id);
+
+      if (updateError) throw updateError;
+
+      setRegenerationError(null);
+      setShowRegenerationModal(false);
+      setRegenerationTarget(null);
+      onUpdateMeetings();
+      setRegenerationToast({
+        message: `Résumé ${targetMode === 'detailed' ? 'détaillé' : 'court'} régénéré avec succès.`,
+        mode: targetMode,
+      });
+      setTimeout(() => setRegenerationToast(null), 4000);
+    } catch (err: any) {
+      console.error('Erreur régénération résumé:', err);
+      setRegenerationError(err.message || 'Une erreur est survenue lors de la régénération.');
+    } finally {
+      setIsRegeneratingSummary(false);
+    }
+  };
   const handleCancelEdit = () => {
     setEditingId(null);
     setEditedTitle('');
@@ -687,6 +890,12 @@ const previewBaseScale = 0.22;
 
   return (
     <div className="space-y-4 md:space-y-5">
+      {isRefreshing && meetings.length > 0 && (
+        <div className="flex items-center gap-2 text-sm text-cocoa-500 bg-white border border-orange-100 rounded-xl px-4 py-2 shadow-sm animate-fadeIn">
+          <Loader2 className="w-4 h-4 animate-spin text-coral-500" />
+          Mise à jour des réunions...
+        </div>
+      )}
       <div className={`bg-gradient-to-r from-white via-[#fff7f0] to-[#ffeede] border-2 border-[#ffd7b7] rounded-xl md:rounded-2xl p-4 md:p-5 sticky top-4 z-30 transition-shadow animate-fadeInDown ${draggedMeetingId ? 'shadow-xl shadow-coral-200/30' : 'shadow-inner shadow-orange-100/30'}`}>
         <div className="flex items-center justify-between mb-3 md:mb-4">
           <div className="flex items-center gap-2">
@@ -943,7 +1152,12 @@ const previewBaseScale = 0.22;
         <>
         {/* Vue grille */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
-          {paginatedMeetings.map((meeting, index) => (
+          {paginatedMeetings.map((meeting, index) => {
+            const summaryBadge = getSummaryBadge(meeting);
+            const showRegenerateButton = canRegenerateSummary(meeting);
+            const targetMode = getTargetMode(meeting);
+
+            return (
             <div
               key={meeting.id}
               className={`group relative bg-white border-2 border-gray-200 rounded-xl overflow-hidden transition-all duration-200 ease-out animate-fadeInUp hover:shadow-xl ${
@@ -1026,6 +1240,17 @@ const previewBaseScale = 0.22;
                   </div>
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${summaryBadge.className}`}>
+                    {summaryBadge.label}
+                  </span>
+                  {meeting.summary_regenerated && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                      Nouvelle version appliquée
+                    </span>
+                  )}
+                </div>
+
                 {/* Actions */}
                 <div className="flex items-center justify-end gap-1 pt-2 border-t border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                   {editingId === meeting.id ? (
@@ -1088,14 +1313,20 @@ const previewBaseScale = 0.22;
                 </div>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
         </>
       ) : (
         <>
         {/* Vue liste */}
         <div className="space-y-2 md:space-y-3">
-          {paginatedMeetings.map((meeting, index) => (
+          {paginatedMeetings.map((meeting, index) => {
+            const summaryBadge = getSummaryBadge(meeting);
+            const showRegenerateButton = canRegenerateSummary(meeting);
+            const targetMode = getTargetMode(meeting);
+
+            return (
         <div
           key={meeting.id}
           className={`relative bg-gradient-to-br from-white to-orange-50/30 border-2 border-orange-100 rounded-xl md:rounded-2xl overflow-hidden transition-all duration-200 ease-out animate-fadeInUp ${
@@ -1154,6 +1385,16 @@ const previewBaseScale = 0.22;
                     <Clock className="w-3.5 h-3.5 md:w-4 md:h-4 text-sunset-500" />
                     <span>{formatDuration(meeting.duration)}</span>
                   </div>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${summaryBadge.className}`}>
+                    {summaryBadge.label}
+                  </span>
+                  {meeting.summary_regenerated && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                      Nouvelle version appliquée
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -1297,7 +1538,8 @@ const previewBaseScale = 0.22;
             )}
           </div>
         </div>
-      ))}
+      );
+      })}
         </div>
         </>
       )}
@@ -1349,16 +1591,39 @@ const previewBaseScale = 0.22;
         </div>
       )}
 
+      <SummaryRegenerationModal
+        isOpen={showRegenerationModal}
+        meetingTitle={regenerationTarget?.title || 'cette réunion'}
+        isProcessing={isRegeneratingSummary}
+        errorMessage={regenerationError}
+        targetMode={regenerationTargetMode}
+        onCancel={closeRegenerationModal}
+        onConfirm={handleConfirmRegeneration}
+      />
+
+      {regenerationToast && (
+        <div className="fixed bottom-6 right-6 z-[1300] animate-fadeInUp">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl border border-emerald-200 bg-white">
+            <Sparkles className="w-5 h-5 text-emerald-500" />
+            <div>
+              <p className="text-sm font-semibold text-cocoa-900">{regenerationToast.message}</p>
+              <p className="text-xs text-cocoa-500">
+                Résumé {regenerationToast.mode === 'detailed' ? 'détaillé' : 'court'} maintenant disponible.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
     {showManageCategories && (
-      <div className="fixed inset-0 z-[1200] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
-        <div className="relative bg-gradient-to-br from-white via-peach-50 to-coral-50 w-full max-w-lg rounded-2xl shadow-2xl border-2 border-coral-300 overflow-hidden animate-zoomIn">
-          <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-coral-100/30 pointer-events-none"></div>
-          <div className="relative flex items-center justify-between px-5 py-4 bg-gradient-to-r from-coral-500 via-sunset-500 to-coral-600 text-white shadow-lg">
+      <div className="fixed inset-0 z-[1200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+        <div className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-zoomIn">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-                <Tag className="w-5 h-5" />
+              <div className="p-2 bg-gray-100 rounded-lg">
+                <Tag className="w-5 h-5 text-gray-600" />
               </div>
-              <h4 className="text-lg font-bold drop-shadow-sm">Gestion des catégories</h4>
+              <h4 className="text-lg font-semibold text-gray-900">Gestion des catégories</h4>
             </div>
             <button
               onClick={() => {
@@ -1366,50 +1631,76 @@ const previewBaseScale = 0.22;
                 setCategoryFormError(null);
                 setNewCategoryName('');
               }}
-              className="p-2 rounded-lg hover:bg-white/20 transition-all duration-300 hover:rotate-90"
+              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
             >
-              <X className="w-5 h-5" />
+              <X className="w-5 h-5 text-gray-500" />
             </button>
           </div>
 
-          <div className="relative px-5 py-4 space-y-4">
-            <form onSubmit={handleCreateCategory} className="space-y-3">
-              <label className="block text-sm font-semibold bg-gradient-to-r from-coral-600 to-sunset-600 bg-clip-text text-transparent">
-                Nouvelle catégorie
-              </label>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="text"
-                  value={newCategoryName}
-                  onChange={(e) => {
-                    setNewCategoryName(e.target.value);
-                    if (categoryFormError) setCategoryFormError(null);
-                  }}
-                  placeholder="Nom de la catégorie"
-                  className="flex-1 px-4 py-2 border-2 border-orange-200 rounded-xl focus:outline-none focus:border-coral-500 focus:ring-4 focus:ring-coral-500/20 transition-all duration-300 hover:border-coral-300 bg-white"
-                />
-                <button
-                  type="submit"
-                  className="group relative inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-coral-500 to-sunset-500 text-white font-semibold transition-all duration-300 shadow-md hover:shadow-xl overflow-hidden"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-                  <PlusCircle className="relative w-4 h-4" />
-                  <span className="relative">Ajouter</span>
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {colorPalette.map((color, index) => (
-                  <button
-                    key={`new-color-${color}`}
-                    type="button"
-                    onClick={() => setNewCategoryColor(color)}
-                    className={`w-9 h-9 rounded-full border-2 transition-all duration-300 shadow-md hover:shadow-lg animate-fadeIn ${newCategoryColor === color ? 'border-coral-600 ring-4 ring-coral-500/30' : 'border-white/50'}`}
-                    style={{ background: color, animationDelay: `${index * 30}ms` }}
-                    title={color}
+          <div className="px-5 py-4 space-y-5">
+            <form onSubmit={handleCreateCategory} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nouvelle catégorie
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => {
+                      setNewCategoryName(e.target.value);
+                      if (categoryFormError) setCategoryFormError(null);
+                    }}
+                    placeholder="Nom de la catégorie"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all bg-white text-sm"
                   />
-                ))}
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium text-sm hover:bg-indigo-700 transition-colors"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    Ajouter
+                  </button>
+                </div>
               </div>
-              <p className="text-xs text-cocoa-500">Couleur sélectionnée : {newCategoryColor}</p>
+
+              {/* Color picker section */}
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-gray-700">Couleur</label>
+                <div className="flex items-start gap-4">
+                  {/* Color preview */}
+                  <div
+                    className="w-12 h-12 rounded-lg border-2 border-gray-200 shadow-sm flex-shrink-0"
+                    style={{ backgroundColor: newCategoryColor }}
+                  />
+                  {/* Presets */}
+                  <div className="flex-1">
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {colorPalette.map((color) => (
+                        <button
+                          key={`preset-${color}`}
+                          type="button"
+                          onClick={() => setNewCategoryColor(color)}
+                          className={`w-6 h-6 rounded-md transition-all ${newCategoryColor === color ? 'ring-2 ring-offset-1 ring-gray-400 scale-110' : 'hover:scale-110'}`}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                    {/* Color picker */}
+                    <div className="color-picker-container">
+                      <HexColorPicker color={newCategoryColor} onChange={setNewCategoryColor} style={{ width: '100%', height: '120px' }} />
+                    </div>
+                    <input
+                      type="text"
+                      value={newCategoryColor}
+                      onChange={(e) => setNewCategoryColor(e.target.value)}
+                      className="mt-2 w-full px-2 py-1.5 text-xs font-mono border border-gray-200 rounded-md focus:outline-none focus:border-indigo-400"
+                      placeholder="#000000"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {categoryFormError && (
                 <p className="text-sm text-red-600">{categoryFormError}</p>
               )}
@@ -1417,42 +1708,48 @@ const previewBaseScale = 0.22;
 
             <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
               {isCategoriesLoading ? (
-                <div className="flex items-center gap-2 text-sm text-cocoa-500">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
                   <Loader2 className="w-4 h-4 animate-spin" /> Chargement des catégories...
                 </div>
               ) : categories.length === 0 ? (
-                <p className="text-sm text-cocoa-500 text-center py-4">Aucune catégorie créée pour le moment.</p>
+                <p className="text-sm text-gray-500 text-center py-4">Aucune catégorie créée pour le moment.</p>
               ) : (
                 categories.map((category, index) => (
                   <div
                     key={category.id}
-                    className="relative flex items-center justify-between px-4 py-3 border-2 border-orange-100 rounded-xl hover:border-coral-300 transition-all duration-300 hover:shadow-lg bg-white/50 backdrop-blur-sm animate-fadeInLeft"
+                    className="relative flex items-center justify-between px-4 py-3 border border-gray-200 rounded-xl hover:border-gray-300 transition-all duration-200 bg-white shadow-sm animate-fadeInLeft"
                     style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <div>
-                      <p className="font-semibold text-cocoa-800">{category.name}</p>
-                      <p className="text-xs text-cocoa-500">
-                          Créée le {new Date(category.created_at).toLocaleDateString('fr-FR')}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-4 h-4 rounded-md flex-shrink-0"
+                          style={{ backgroundColor: category.color || '#6366F1' }}
+                        />
+                        <p className="font-medium text-gray-900 truncate">{category.name}</p>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1 ml-7">
+                        Créée le {new Date(category.created_at).toLocaleDateString('fr-FR')}
                       </p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          {colorPalette.map((color) => (
-                            <button
-                              key={`palette-${category.id}-${color}`}
-                              type="button"
-                              onClick={() => handleUpdateCategoryColor(category.id, color)}
-                              className={`w-7 h-7 rounded-full border-2 transition-all duration-300 shadow-sm hover:shadow-md ${category.color === color ? 'border-coral-600 ring-4 ring-coral-500/30' : 'border-white/50'}`}
-                              style={{ background: color }}
-                              title={color}
-                            />
-                          ))}
-                        </div>
+                      <div className="mt-2 ml-7 flex flex-wrap items-center gap-1.5">
+                        {colorPalette.map((color) => (
+                          <button
+                            key={`palette-${category.id}-${color}`}
+                            type="button"
+                            onClick={() => handleUpdateCategoryColor(category.id, color)}
+                            className={`w-5 h-5 rounded transition-all duration-150 ${category.color === color ? 'ring-2 ring-offset-1 ring-gray-400 scale-110' : 'hover:scale-110 opacity-70 hover:opacity-100'}`}
+                            style={{ backgroundColor: color }}
+                            title={color}
+                          />
+                        ))}
+                      </div>
                     </div>
                     <button
                       onClick={() => handleDeleteCategory(category.id)}
-                      className="p-2 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-300 hover:shadow-md"
+                      className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors ml-2"
                       title="Supprimer la catégorie"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 ))

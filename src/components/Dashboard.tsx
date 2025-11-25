@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, Clock, FileText, Calendar, BarChart3, Crown, Zap, AlertCircle, RefreshCw } from 'lucide-react';
+import { TrendingUp, Clock, FileText, Calendar, BarChart3, Crown, Zap, AlertCircle, RefreshCw, Mail, Eye, Users, PieChart, ArrowUp, ArrowDown } from 'lucide-react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -21,6 +21,27 @@ interface DashboardStats {
     date: string;
     meetings: number;
     minutes: number;
+  }[];
+  // Stats emails (7 derniers jours)
+  emailsSent: number;
+  emailsOpened: number;
+  // Stats avancées pour l'onglet Statistiques
+  emailOpenRate: number; // Taux d'ouverture en %
+  totalEmailsAllTime: number;
+  totalOpensAllTime: number;
+  topContacts: {
+    email: string;
+    emailsSent: number;
+    opens: number;
+    openRate: number;
+  }[];
+  weekComparison: {
+    meetingsChange: number; // % de changement vs semaine précédente
+    emailsChange: number;
+  };
+  hourlyActivity: {
+    hour: number;
+    meetings: number;
   }[];
 }
 
@@ -44,8 +65,17 @@ export function Dashboard() {
     periodMeetings: 0,
     periodMinutes: 0,
     averageDuration: 0,
-    recentActivity: []
+    recentActivity: [],
+    emailsSent: 0,
+    emailsOpened: 0,
+    emailOpenRate: 0,
+    totalEmailsAllTime: 0,
+    totalOpensAllTime: 0,
+    topContacts: [],
+    weekComparison: { meetingsChange: 0, emailsChange: 0 },
+    hourlyActivity: []
   });
+  const [activeTab, setActiveTab] = useState<'overview' | 'statistics'>('overview');
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [periodFilter, setPeriodFilter] = useState<'today' | 'week' | 'year'>('today');
@@ -139,13 +169,112 @@ export function Dashboard() {
         .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, 7);
 
+      // Charger les stats d'emails selon la période sélectionnée (ou 7 derniers jours par défaut)
+      let emailQuery = supabase
+        .from('email_history')
+        .select('id, status, first_opened_at, recipients, sent_at')
+        .eq('user_id', user.id);
+
+      // Appliquer le filtre de période aux emails
+      if (startFilter) {
+        emailQuery = emailQuery.gte('sent_at', startFilter.toISOString());
+      }
+      if (endFilter) {
+        emailQuery = emailQuery.lte('sent_at', endFilter.toISOString());
+      }
+
+      const { data: emailStats } = await emailQuery;
+
+      const emailsSent = emailStats?.filter(e => e.status === 'sent').length || 0;
+      const emailsOpened = emailStats?.filter(e => e.first_opened_at !== null && e.status === 'sent').length || 0;
+
+      // Stats avancées pour l'onglet Statistiques (filtrées par période)
+      const periodEmails = emailStats?.filter(e => e.status === 'sent') || [];
+      const totalEmailsAllTime = periodEmails.length;
+      const totalOpensAllTime = periodEmails.filter(e => e.first_opened_at !== null).length;
+      const emailOpenRate = totalEmailsAllTime > 0 ? Math.round((totalOpensAllTime / totalEmailsAllTime) * 100) : 0;
+
+      // Top contacts (les plus fréquents) - basés sur la période filtrée
+      const contactMap = new Map<string, { sent: number; opened: number }>();
+      periodEmails.forEach(email => {
+        const recipients = email.recipients?.split(',').map((r: string) => r.trim().toLowerCase()) || [];
+        recipients.forEach((recipient: string) => {
+          if (!recipient) return;
+          const current = contactMap.get(recipient) || { sent: 0, opened: 0 };
+          current.sent += 1;
+          if (email.first_opened_at) current.opened += 1;
+          contactMap.set(recipient, current);
+        });
+      });
+
+      const topContacts = Array.from(contactMap.entries())
+        .map(([email, data]) => ({
+          email,
+          emailsSent: data.sent,
+          opens: data.opened,
+          openRate: data.sent > 0 ? Math.round((data.opened / data.sent) * 100) : 0
+        }))
+        .sort((a, b) => b.emailsSent - a.emailsSent)
+        .slice(0, 5);
+
+      // Comparaison avec la période précédente (même durée)
+      // Calculer la durée de la période sélectionnée
+      const periodDuration = (startFilter && endFilter)
+        ? endFilter.getTime() - startFilter.getTime()
+        : 7 * 24 * 60 * 60 * 1000; // 7 jours par défaut
+
+      const previousPeriodEnd = startFilter || last7Days;
+      const previousPeriodStart = new Date(previousPeriodEnd.getTime() - periodDuration);
+
+      const thisWeekMeetings = filteredMeetings.length;
+      const lastWeekMeetings = meetings.filter(m => {
+        const d = new Date(m.created_at);
+        return d >= previousPeriodStart && d < previousPeriodEnd;
+      }).length;
+      const meetingsChange = lastWeekMeetings > 0
+        ? Math.round(((thisWeekMeetings - lastWeekMeetings) / lastWeekMeetings) * 100)
+        : thisWeekMeetings > 0 ? 100 : 0;
+
+      // Emails de la période précédente
+      const { data: lastPeriodEmails } = await supabase
+        .from('email_history')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('status', 'sent')
+        .gte('sent_at', previousPeriodStart.toISOString())
+        .lt('sent_at', previousPeriodEnd.toISOString());
+
+      const lastPeriodEmailCount = lastPeriodEmails?.length || 0;
+      const emailsChange = lastPeriodEmailCount > 0
+        ? Math.round(((emailsSent - lastPeriodEmailCount) / lastPeriodEmailCount) * 100)
+        : emailsSent > 0 ? 100 : 0;
+
+      // Activité par heure (basée sur la période filtrée)
+      const hourlyMap = new Map<number, number>();
+      filteredMeetings.forEach(m => {
+        const hour = new Date(m.created_at).getHours();
+        hourlyMap.set(hour, (hourlyMap.get(hour) || 0) + 1);
+      });
+      const hourlyActivity = Array.from({ length: 24 }, (_, hour) => ({
+        hour,
+        meetings: hourlyMap.get(hour) || 0
+      }));
+
       setStats({
         totalMeetings,
         totalMinutes: totalMinutesAll,
         periodMeetings: filteredMeetings.length,
         periodMinutes: Math.round(periodSeconds / 60),
         averageDuration,
-        recentActivity
+        recentActivity,
+        emailsSent,
+        emailsOpened,
+        emailOpenRate,
+        totalEmailsAllTime,
+        totalOpensAllTime,
+        topContacts,
+        weekComparison: { meetingsChange, emailsChange },
+        hourlyActivity
       });
 
       // ✅ Utiliser minutes_used_this_month DIRECTEMENT depuis la DB
@@ -160,8 +289,22 @@ export function Dashboard() {
     }
   }, []);
 
+  // Initialiser avec le filtre "today" au premier chargement
   useEffect(() => {
-    loadStats(appliedRange);
+    // Si appliedRange est vide au démarrage, appliquer le filtre "today"
+    if (!appliedRange.start && !appliedRange.end) {
+      const now = new Date();
+      const formatLocalDate = (d: Date) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      const todayStr = formatLocalDate(now);
+      setAppliedRange({ start: todayStr, end: todayStr });
+    } else {
+      loadStats(appliedRange);
+    }
   }, [appliedRange, loadStats]);
 
   const handlePeriodFilter = (period: 'today' | 'week' | 'year') => {
@@ -181,9 +324,17 @@ export function Dashboard() {
         break;
     }
 
+    // Formater les dates en local (pas UTC) pour éviter les décalages de fuseau horaire
+    const formatLocalDate = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
     const range = {
-      start: start.toISOString().split('T')[0],
-      end: now.toISOString().split('T')[0]
+      start: formatLocalDate(start),
+      end: formatLocalDate(now)
     };
 
     setAppliedRange(range);
@@ -245,9 +396,36 @@ export function Dashboard() {
   return (
     <div className="h-full bg-gray-50 p-4 md:p-8 overflow-auto">
       <div className="max-w-7xl mx-auto">
-        {/* Header avec filtres */}
+        {/* Header avec onglets et filtres */}
         <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 animate-fadeInDown">
-          <h1 className="text-2xl font-bold text-gray-900">Tableau de bord</h1>
+          <div className="flex items-center gap-6">
+            <h1 className="text-2xl font-bold text-gray-900">Tableau de bord</h1>
+            {/* Onglets */}
+            <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'overview'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                Aperçu
+              </button>
+              <button
+                onClick={() => setActiveTab('statistics')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'statistics'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <PieChart className="w-4 h-4" />
+                Statistiques
+              </button>
+            </div>
+          </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-white rounded-xl shadow-sm overflow-hidden">
               <button
@@ -291,6 +469,9 @@ export function Dashboard() {
           </div>
         </div>
 
+        {/* Contenu selon l'onglet actif */}
+        {activeTab === 'overview' ? (
+          <>
         {/* Carte d'abonnement */}
         {subscription && (
           <div className={`mb-8 rounded-2xl shadow-xl border-2 p-6 animate-fadeInUp delay-150 ${
@@ -440,7 +621,18 @@ export function Dashboard() {
               Activité récente (7 derniers jours)
             </h2>
             <p className="text-2xl font-bold text-gray-900 mb-1">{stats.totalMinutes}min</p>
-            <p className="text-xs text-gray-500 mb-6">5 email filté + 10 réponses</p>
+            <p className="text-xs text-gray-500 mb-6">
+              {stats.emailsSent > 0 ? (
+                <>
+                  {stats.emailsSent} email{stats.emailsSent > 1 ? 's' : ''} envoyé{stats.emailsSent > 1 ? 's' : ''}
+                  {stats.emailsOpened > 0 && (
+                    <span className="text-emerald-600 font-medium"> • {stats.emailsOpened} ouvert{stats.emailsOpened > 1 ? 's' : ''}</span>
+                  )}
+                </>
+              ) : (
+                'Aucun email envoyé'
+              )}
+            </p>
 
             {stats.recentActivity.length === 0 ? (
               <p className="text-gray-400 text-center py-8">Aucune activité récente</p>
@@ -532,24 +724,230 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="mt-6 bg-gradient-to-r from-coral-50 via-peach-50 to-sunset-50 border-2 border-coral-200 rounded-2xl p-6 shadow-lg">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-gradient-to-br from-coral-500 to-sunset-500 rounded-xl shadow-md">
-              <Clock className="w-6 h-6 text-white" />
+          </>
+        ) : (
+          /* Onglet Statistiques */
+          <div className="space-y-6 animate-fadeIn">
+            {/* Cartes de performance */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Taux d'ouverture */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-3 bg-emerald-100 rounded-xl">
+                    <Eye className="w-6 h-6 text-emerald-600" />
+                  </div>
+                  <span className={`flex items-center gap-1 text-sm font-medium ${
+                    stats.weekComparison.emailsChange >= 0 ? 'text-emerald-600' : 'text-red-500'
+                  }`}>
+                    {stats.weekComparison.emailsChange >= 0 ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+                    {Math.abs(stats.weekComparison.emailsChange)}%
+                  </span>
+                </div>
+                <p className="text-3xl font-bold text-gray-900">{stats.emailOpenRate}%</p>
+                <p className="text-sm text-gray-500 mt-1">Taux d'ouverture</p>
+              </div>
+
+              {/* Emails envoyés */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-3 bg-blue-100 rounded-xl">
+                    <Mail className="w-6 h-6 text-blue-600" />
+                  </div>
+                </div>
+                <p className="text-3xl font-bold text-gray-900">{stats.totalEmailsAllTime}</p>
+                <p className="text-sm text-gray-500 mt-1">Emails envoyés ({periodLabel.toLowerCase()})</p>
+              </div>
+
+              {/* Emails ouverts */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-3 bg-purple-100 rounded-xl">
+                    <Eye className="w-6 h-6 text-purple-600" />
+                  </div>
+                </div>
+                <p className="text-3xl font-bold text-gray-900">{stats.totalOpensAllTime}</p>
+                <p className="text-sm text-gray-500 mt-1">Emails ouverts ({periodLabel.toLowerCase()})</p>
+              </div>
+
+              {/* Comparaison réunions */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-3 bg-orange-100 rounded-xl">
+                    <TrendingUp className="w-6 h-6 text-orange-600" />
+                  </div>
+                  <span className={`flex items-center gap-1 text-sm font-medium ${
+                    stats.weekComparison.meetingsChange >= 0 ? 'text-emerald-600' : 'text-red-500'
+                  }`}>
+                    {stats.weekComparison.meetingsChange >= 0 ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+                    {Math.abs(stats.weekComparison.meetingsChange)}%
+                  </span>
+                </div>
+                <p className="text-3xl font-bold text-gray-900">{stats.periodMeetings}</p>
+                <p className="text-sm text-gray-500 mt-1">Réunions cette période</p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-cocoa-900 mb-1">Facturation à la minute</h3>
-              <p className="text-sm text-cocoa-700 mb-2">
-                Vous êtes facturé uniquement pour les minutes réellement utilisées.
-                Ce mois-ci, vous avez utilisé <span className="font-bold text-coral-600">{subscription?.minutes_used_this_month || 0} minutes</span>
-                {stats.periodMeetings > 0 && ` sur ${stats.periodMeetings} réunion${stats.periodMeetings > 1 ? 's' : ''}`}.
-              </p>
-              <p className="text-xs text-cocoa-600">
-                Profitez d'une tarification transparente et flexible adaptée à vos besoins.
-              </p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Top Contacts */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="p-2 bg-coral-100 rounded-lg">
+                    <Users className="w-5 h-5 text-coral-600" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900">Top Contacts</h3>
+                </div>
+                {stats.topContacts.length === 0 ? (
+                  <p className="text-gray-400 text-center py-8">Aucun contact pour le moment</p>
+                ) : (
+                  <div className="space-y-4">
+                    {stats.topContacts.map((contact, index) => (
+                      <div key={contact.email} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-sm ${
+                            index === 0 ? 'bg-amber-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-orange-400' : 'bg-gray-300'
+                          }`}>
+                            {index + 1}
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900 text-sm truncate max-w-[200px]">{contact.email}</p>
+                            <p className="text-xs text-gray-500">{contact.emailsSent} emails envoyés</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={`font-semibold text-sm ${contact.openRate >= 50 ? 'text-emerald-600' : 'text-gray-600'}`}>
+                            {contact.openRate}%
+                          </p>
+                          <p className="text-xs text-gray-400">ouverture</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Activité par heure */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg shadow-indigo-200">
+                      <Clock className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">Heures productives</h3>
+                      <p className="text-xs text-gray-400">Activité par créneau horaire</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span className="w-2 h-2 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500"></span>
+                    Réunions
+                  </div>
+                </div>
+                <div className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={stats.hourlyActivity.filter(h => h.hour >= 6 && h.hour <= 22)}
+                      margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient id="colorHourlyPro" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#6366f1" stopOpacity={0.4}/>
+                          <stop offset="50%" stopColor="#8b5cf6" stopOpacity={0.2}/>
+                          <stop offset="100%" stopColor="#a855f7" stopOpacity={0.05}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid
+                        strokeDasharray="0"
+                        stroke="#f1f5f9"
+                        vertical={false}
+                      />
+                      <XAxis
+                        dataKey="hour"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                        tickFormatter={(h) => h % 3 === 0 ? `${h}h` : ''}
+                        interval={0}
+                        dy={8}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 11, fill: '#94a3b8' }}
+                        tickCount={4}
+                        allowDecimals={false}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'white',
+                          border: 'none',
+                          borderRadius: '12px',
+                          boxShadow: '0 10px 40px rgba(0,0,0,0.12)',
+                          padding: '12px 16px',
+                        }}
+                        formatter={(value: number) => [
+                          <span key="val" className="font-semibold text-gray-900">{value} réunion{value > 1 ? 's' : ''}</span>,
+                          ''
+                        ]}
+                        labelFormatter={(hour) => (
+                          <span className="text-sm font-medium text-gray-600">{hour}h - {Number(hour) + 1}h</span>
+                        )}
+                        cursor={{ stroke: '#e2e8f0', strokeWidth: 1 }}
+                      />
+                      <Area
+                        type="monotoneX"
+                        dataKey="meetings"
+                        stroke="url(#strokeGradient)"
+                        fill="url(#colorHourlyPro)"
+                        strokeWidth={2.5}
+                        dot={false}
+                        activeDot={{
+                          r: 6,
+                          fill: '#6366f1',
+                          stroke: 'white',
+                          strokeWidth: 3,
+                          filter: 'drop-shadow(0 2px 4px rgba(99,102,241,0.4))'
+                        }}
+                      />
+                      <defs>
+                        <linearGradient id="strokeGradient" x1="0" y1="0" x2="1" y2="0">
+                          <stop offset="0%" stopColor="#6366f1"/>
+                          <stop offset="50%" stopColor="#8b5cf6"/>
+                          <stop offset="100%" stopColor="#a855f7"/>
+                        </linearGradient>
+                      </defs>
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
+            {/* Résumé de la période */}
+            <div className="bg-gradient-to-r from-coral-500 to-sunset-500 rounded-2xl p-6 text-white">
+              <div className="flex items-center gap-3 mb-4">
+                <TrendingUp className="w-6 h-6" />
+                <h3 className="text-lg font-semibold">Performance - {periodFilter === 'today' ? "Aujourd'hui" : periodFilter === 'week' ? 'Cette semaine' : 'Cette année'}</h3>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white/20 rounded-xl p-4">
+                  <p className="text-2xl font-bold">{stats.emailsSent}</p>
+                  <p className="text-sm text-white/80">Emails envoyés</p>
+                </div>
+                <div className="bg-white/20 rounded-xl p-4">
+                  <p className="text-2xl font-bold">{stats.emailsOpened}</p>
+                  <p className="text-sm text-white/80">Emails ouverts</p>
+                </div>
+                <div className="bg-white/20 rounded-xl p-4">
+                  <p className="text-2xl font-bold">{stats.periodMeetings}</p>
+                  <p className="text-sm text-white/80">Réunions</p>
+                </div>
+                <div className="bg-white/20 rounded-xl p-4">
+                  <p className="text-2xl font-bold">{stats.periodMinutes}min</p>
+                  <p className="text-sm text-white/80">Temps total</p>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

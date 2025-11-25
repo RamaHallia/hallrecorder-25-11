@@ -1,6 +1,7 @@
 import { Crown, Check, Loader } from 'lucide-react';
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { useDialog } from '../context/DialogContext';
 
 interface SubscriptionSelectionProps {
   onClose: () => void;
@@ -17,6 +18,7 @@ export const SubscriptionSelection = ({
 }: SubscriptionSelectionProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'starter' | 'unlimited' | null>(null);
+  const { showAlert } = useDialog();
 
   const handleSubscribe = async (plan: 'starter' | 'unlimited') => {
     setIsProcessing(true);
@@ -62,7 +64,11 @@ export const SubscriptionSelection = ({
       }
     } catch (error) {
       console.error('Erreur:', error);
-      alert('Une erreur est survenue. Veuillez réessayer.');
+      await showAlert({
+        title: 'Erreur d\'abonnement',
+        message: 'Une erreur est survenue. Veuillez réessayer.',
+        variant: 'danger',
+      });
       setIsProcessing(false);
       setSelectedPlan(null);
     }

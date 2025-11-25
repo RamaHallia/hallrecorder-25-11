@@ -1,6 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Mail, Calendar, User, Paperclip, CheckCircle, XCircle, Trash2, ExternalLink, Search, Filter, X, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useDialog } from '../context/DialogContext';
+
+interface EmailOpenEvent {
+  id: string;
+  recipient_email: string | null;
+  opened_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+}
 
 interface EmailHistoryItem {
   id: string;
@@ -16,10 +25,10 @@ interface EmailHistoryItem {
   error_message: string | null;
   message_id: string | null;
   sent_at: string;
-  email_open_events?: Array<{
-    recipient_email: string | null;
-    opened_at: string;
-  }>;
+  tracking_id?: string;
+  open_count?: number;
+  first_opened_at?: string | null;
+  email_open_events?: EmailOpenEvent[];
 }
 
 interface EmailHistoryProps {
@@ -36,6 +45,7 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
   const [previewEmail, setPreviewEmail] = useState<EmailHistoryItem | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [openRecipientsEmailId, setOpenRecipientsEmailId] = useState<string | null>(null);
+  const { showAlert, showConfirm } = useDialog();
   
   // États des filtres
   const [searchQuery, setSearchQuery] = useState('');
@@ -46,6 +56,53 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
 
   useEffect(() => {
     loadEmailHistory();
+
+    // Temps réel : écouter les nouvelles ouvertures et mettre à jour SILENCIEUSEMENT
+    const channel = supabase
+      .channel('email-tracking-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'email_open_events',
+        },
+        (payload) => {
+          console.log('📬 Nouvelle ouverture détectée en temps réel:', payload);
+          const newEvent = payload.new as EmailOpenEvent & { email_history_id: string };
+
+          // Mise à jour silencieuse : ajouter l'event aux données locales
+          setEmails(prevEmails => prevEmails.map(email => {
+            // Chercher l'email correspondant (par id direct ou dans le groupe)
+            const isMatch = email.id === newEvent.email_history_id;
+            if (!isMatch) return email;
+
+            // Ajouter le nouvel event en tête de liste (plus récent)
+            const updatedEvents = [
+              {
+                id: newEvent.id,
+                recipient_email: newEvent.recipient_email,
+                opened_at: newEvent.opened_at,
+                ip_address: newEvent.ip_address,
+                user_agent: newEvent.user_agent,
+              },
+              ...(email.email_open_events || []),
+            ];
+
+            return {
+              ...email,
+              email_open_events: updatedEvents,
+              open_count: (email.open_count || 0) + 1,
+              first_opened_at: email.first_opened_at || newEvent.opened_at,
+            };
+          }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -59,13 +116,25 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
       setIsLoading(true);
       const { data, error } = await supabase
         .from('email_history')
-        .select('*, email_open_events(recipient_email, opened_at)')
+        .select('*, email_open_events(id, recipient_email, opened_at, ip_address, user_agent)')
         .eq('user_id', userId)
         .order('sent_at', { ascending: false })
-        .limit(50); // Derniers 50 emails
+        .limit(200);
 
       if (error) throw error;
-      setEmails(data || []);
+
+      // Trier les events par date décroissante pour chaque email
+      const dataWithSortedEvents = (data || []).map(email => ({
+        ...email,
+        email_open_events: (email.email_open_events || []).sort(
+          (a: EmailOpenEvent, b: EmailOpenEvent) =>
+            new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime()
+        ),
+      }));
+
+      // 🎯 GROUPER les emails par tracking_id (envoi individuel)
+      const groupedEmails = groupEmailsByTrackingId(dataWithSortedEvents);
+      setEmails(groupedEmails);
     } catch (error) {
       console.error('Erreur lors du chargement de l\'historique:', error);
     } finally {
@@ -73,8 +142,82 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
     }
   };
 
+  // 🎯 Fonction pour grouper les emails par tracking_id
+  const groupEmailsByTrackingId = (emails: EmailHistoryItem[]): EmailHistoryItem[] => {
+    console.log('🔍 Groupement emails - Total reçus:', emails.length);
+    
+    const grouped = new Map<string, EmailHistoryItem>();
+
+    emails.forEach(email => {
+      const trackingId = email.tracking_id || email.id; // Fallback sur id si pas de tracking_id
+      
+      console.log('📧 Email:', {
+        id: email.id,
+        tracking_id: email.tracking_id,
+        recipient: email.recipients,
+        subject: email.subject.substring(0, 50)
+      });
+      
+      if (grouped.has(trackingId)) {
+        // Fusionner avec l'email existant
+        const existing = grouped.get(trackingId)!;
+        console.log('🔄 Fusion avec email existant, tracking_id:', trackingId);
+        
+        // Combiner les destinataires
+        const allRecipients = [
+          ...parseRecipientList(existing.recipients),
+          ...parseRecipientList(email.recipients),
+        ];
+        existing.recipients = Array.from(new Set(allRecipients)).join(', ');
+        
+        // Combiner les CC
+        if (email.cc_recipients) {
+          const allCC = [
+            ...parseRecipientList(existing.cc_recipients || ''),
+            ...parseRecipientList(email.cc_recipients),
+          ];
+          existing.cc_recipients = Array.from(new Set(allCC)).filter(c => c).join(', ');
+        }
+        
+        // Combiner les events d'ouverture
+        existing.email_open_events = [
+          ...(existing.email_open_events || []),
+          ...(email.email_open_events || []),
+        ];
+        
+        // Utiliser la date la plus récente
+        if (new Date(email.sent_at) > new Date(existing.sent_at)) {
+          existing.sent_at = email.sent_at;
+        }
+        
+        console.log('✅ Après fusion, recipients:', existing.recipients);
+      } else {
+        // Premier email de ce groupe
+        console.log('➕ Nouvel email, tracking_id:', trackingId);
+        grouped.set(trackingId, { ...email });
+      }
+    });
+
+    const result = Array.from(grouped.values()).sort((a, b) => 
+      new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime()
+    );
+    
+    console.log('✅ Groupement terminé - Total groupés:', result.length);
+    result.forEach(email => {
+      console.log('📬 Email groupé:', email.subject.substring(0, 50), '→', email.recipients);
+    });
+    
+    return result;
+  };
+
   const handleDelete = async (emailId: string) => {
-    if (!confirm('Supprimer cet email de l\'historique ?')) return;
+    const confirmed = await showConfirm({
+      title: 'Supprimer l\'email',
+      message: 'Supprimer cet email de l\'historique ?',
+      confirmLabel: 'Supprimer',
+      variant: 'warning',
+    });
+    if (!confirmed) return;
 
     try {
       const { error } = await supabase
@@ -87,7 +230,11 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
       setEmails(emails.filter(e => e.id !== emailId));
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
-      alert('Erreur lors de la suppression');
+      await showAlert({
+        title: 'Erreur',
+        message: 'Erreur lors de la suppression',
+        variant: 'danger',
+      });
     }
   };
 
@@ -156,20 +303,44 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
     const ccRecipients = parseRecipientList(email.cc_recipients).map(address => ({ email: address, type: 'CC' }));
     const recipients = [...toRecipients, ...ccRecipients];
 
-    const openedMap = new Map<string, string>();
+    // Regrouper TOUTES les ouvertures par destinataire
+    const openedMap = new Map<string, EmailOpenEvent[]>();
     (email.email_open_events || []).forEach(evt => {
       if (evt.recipient_email) {
-        openedMap.set(evt.recipient_email.trim().toLowerCase(), evt.opened_at);
+        const key = evt.recipient_email.trim().toLowerCase();
+        if (!openedMap.has(key)) {
+          openedMap.set(key, []);
+        }
+        openedMap.get(key)!.push(evt);
       }
     });
 
     return recipients.map(rec => {
       const key = rec.email.trim().toLowerCase();
+      const opens = openedMap.get(key) || [];
       return {
         ...rec,
-        openedAt: openedMap.get(key) || null,
+        opens, // Toutes les ouvertures
+        openCount: opens.length,
+        firstOpenedAt: opens.length > 0 ? opens[opens.length - 1].opened_at : null, // Plus ancienne
+        lastOpenedAt: opens.length > 0 ? opens[0].opened_at : null, // Plus récente
       };
     });
+  };
+
+  // Calculer le total d'ouvertures pour un email
+  const getTotalOpenCount = (email: EmailHistoryItem) => {
+    return email.open_count || (email.email_open_events?.length || 0);
+  };
+
+  // Retirer le pixel de tracking du HTML pour la prévisualisation
+  const sanitizeHtmlForPreview = (html: string | null): string => {
+    if (!html) return '';
+    // Retirer les images de tracking (1x1 pixels avec email-open-tracker dans l'URL)
+    return html
+      .replace(/<img[^>]*email-open-tracker[^>]*>/gi, '')
+      .replace(/<img[^>]*width=["']?1["']?[^>]*height=["']?1["']?[^>]*>/gi, '')
+      .replace(/<img[^>]*height=["']?1["']?[^>]*width=["']?1["']?[^>]*>/gi, '');
   };
 
   // Fonction de filtrage
@@ -436,7 +607,8 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
         {paginatedEmails.map((email) => {
           const recipientStatuses = buildRecipientStatuses(email);
           const totalRecipients = recipientStatuses.length;
-          const openedCount = recipientStatuses.filter(r => r.openedAt).length;
+          const openedRecipientsCount = recipientStatuses.filter(r => r.openCount > 0).length;
+          const totalOpenCount = getTotalOpenCount(email);
 
           return (
             <div
@@ -484,10 +656,25 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
                         </div>
                       )}
                       {getMethodBadge(email.method)}
-                      {totalRecipients > 0 && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-coral-50 border border-coral-200 px-2 py-0.5 text-coral-600 font-semibold">
+                      {/* Badge de suivi - différent selon la méthode d'envoi */}
+                      {email.method === 'local' ? (
+                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold bg-amber-50 border border-amber-200 text-amber-600">
                           <Eye className="w-3 h-3" />
-                          {openedCount}/{totalRecipients} ouvert{openedCount > 1 ? 's' : ''}
+                          Suivi non disponible
+                        </span>
+                      ) : totalRecipients > 0 && (
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
+                          openedRecipientsCount > 0
+                            ? 'bg-emerald-50 border border-emerald-200 text-emerald-600'
+                            : 'bg-gray-50 border border-gray-200 text-gray-500'
+                        }`}>
+                          <Eye className="w-3 h-3" />
+                          {openedRecipientsCount}/{totalRecipients}
+                          {totalOpenCount > 0 && (
+                            <span className="ml-1 px-1.5 py-0.5 bg-emerald-500 text-white text-xs rounded-full">
+                              {totalOpenCount}×
+                            </span>
+                          )}
                         </span>
                       )}
                     </div>
@@ -495,17 +682,23 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
 
                   {/* Actions */}
                   <div className="flex items-center gap-2">
-                    {totalRecipients > 0 && (
+                    {/* Bouton suivi - uniquement si méthode != local */}
+                    {email.method !== 'local' && totalRecipients > 0 && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setOpenRecipientsEmailId(prev => prev === email.id ? null : email.id);
                         }}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-coral-200 text-coral-600 hover:bg-coral-50 transition-colors text-xs font-semibold"
+                        className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border transition-colors text-xs font-semibold ${
+                          openedRecipientsCount > 0
+                            ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
+                            : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                        }`}
                         title="Voir le suivi des destinataires"
                       >
                         <Eye className="w-4 h-4" />
-                        {openedCount}/{totalRecipients}
+                        {openedRecipientsCount}/{totalRecipients}
+                        {totalOpenCount > 0 && ` (${totalOpenCount}×)`}
                       </button>
                     )}
                     <button
@@ -546,59 +739,104 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
                     </div>
                   )}
 
-                  {totalRecipients > 0 && (
+                  {/* Section suivi des destinataires */}
+                  {email.method === 'local' ? (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-amber-700">
+                        <Eye className="w-4 h-4" />
+                        <span className="text-sm font-medium">Suivi des ouvertures non disponible</span>
+                      </div>
+                      <p className="text-xs text-amber-600 mt-1">
+                        Les emails envoyés via l'application locale ne supportent pas le suivi des ouvertures.
+                        Utilisez Gmail ou SMTP pour bénéficier du suivi.
+                      </p>
+                    </div>
+                  ) : totalRecipients > 0 && (
                     <div>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setOpenRecipientsEmailId(prev => prev === email.id ? null : email.id);
                         }}
-                        className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-coral-200 rounded-lg text-sm font-semibold text-coral-600 hover:bg-coral-50 transition-colors"
+                        className={`inline-flex items-center gap-2 px-3 py-2 bg-white border rounded-lg text-sm font-semibold transition-colors ${
+                          openedRecipientsCount > 0
+                            ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
+                            : 'border-coral-200 text-coral-600 hover:bg-coral-50'
+                        }`}
                       >
                         <Eye className="w-4 h-4" />
                         Suivi des destinataires
+                        {totalOpenCount > 0 && (
+                          <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs rounded-full">
+                            {totalOpenCount} ouverture{totalOpenCount > 1 ? 's' : ''}
+                          </span>
+                        )}
                       </button>
                       {openRecipientsEmailId === email.id && (
-                        <div className="mt-3 overflow-x-auto">
+                        <div className="mt-3 overflow-x-auto bg-white rounded-lg border border-coral-100">
                           <table className="min-w-full text-sm">
-                            <thead>
+                            <thead className="bg-gray-50">
                               <tr className="text-left text-xs uppercase text-cocoa-500 tracking-wide">
-                                <th className="py-2 pr-4">Destinataire</th>
-                                <th className="py-2 pr-4">Type</th>
-                                <th className="py-2 pr-4">Statut</th>
+                                <th className="py-3 px-4">Destinataire</th>
+                                <th className="py-3 px-4">Type</th>
+                                <th className="py-3 px-4">Ouvertures</th>
+                                <th className="py-3 px-4">Historique</th>
                               </tr>
                             </thead>
                             <tbody>
                               {recipientStatuses.map((recipient) => (
-                                <tr key={`${email.id}-${recipient.type}-${recipient.email}`} className="border-t border-coral-100">
-                                  <td className="py-2 pr-4 font-medium text-cocoa-800">{recipient.email}</td>
-                                  <td className="py-2 pr-4 text-cocoa-500">{recipient.type}</td>
-                                  <td className="py-2 pr-4">
-                                    {recipient.openedAt ? (
-                                    <div className="space-y-1">
+                                <tr key={`${email.id}-${recipient.type}-${recipient.email}`} className="border-t border-gray-100 hover:bg-gray-50">
+                                  <td className="py-3 px-4 font-medium text-cocoa-800">{recipient.email}</td>
+                                  <td className="py-3 px-4 text-cocoa-500">{recipient.type}</td>
+                                  <td className="py-3 px-4">
+                                    {recipient.openCount > 0 ? (
                                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-emerald-600 font-semibold">
-                                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                        Ouvert
+                                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                        {recipient.openCount}×
                                       </span>
-                                      <p className="text-xs text-cocoa-500">
-                                        {formatExactDateTime(recipient.openedAt)}
-                                      </p>
-                                    </div>
-                                   ) : (
-                                     <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 border border-gray-200 px-2 py-0.5 text-gray-500 font-semibold">
-                                       <span className="w-2 h-2 rounded-full bg-gray-300"></span>
-                                       Pas encore ouvert
-                                     </span>
-                                   )}
-                                 </td>
-                               </tr>
-                             ))}
-                           </tbody>
-                         </table>
-                       </div>
-                     )}
-                   </div>
-                 )}
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 border border-gray-200 px-2 py-0.5 text-gray-500 font-semibold">
+                                        <span className="w-2 h-2 rounded-full bg-gray-300"></span>
+                                        0
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    {recipient.openCount > 0 ? (
+                                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                                        {recipient.opens.map((open, idx) => (
+                                          <div key={open.id || idx} className="flex items-center gap-2 text-xs">
+                                            <span className={`w-1.5 h-1.5 rounded-full ${idx === 0 ? 'bg-emerald-500' : 'bg-gray-300'}`}></span>
+                                            <span className={idx === 0 ? 'text-emerald-600 font-medium' : 'text-cocoa-500'}>
+                                              {formatExactDateTime(open.opened_at)}
+                                            </span>
+                                            {idx === 0 && (
+                                              <span className="text-emerald-500 text-xs">(dernière)</span>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-gray-400 italic">Pas encore ouvert</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {/* Résumé */}
+                          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-sm">
+                            <span className="text-cocoa-600">
+                              <strong>{openedRecipientsCount}</strong> sur <strong>{totalRecipients}</strong> destinataires ont ouvert
+                            </span>
+                            <span className="text-emerald-600 font-semibold">
+                              Total : {totalOpenCount} ouverture{totalOpenCount > 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                  <div className="flex flex-wrap gap-3">
                    {email.meeting_id && onViewMeeting && (
@@ -732,11 +970,11 @@ export const EmailHistory = ({ userId, onViewMeeting }: EmailHistoryProps) => {
              </div>
            </div>
 
-           {/* Corps de l'email */}
+           {/* Corps de l'email - pixel de tracking retiré pour éviter les faux positifs */}
            <div className="flex-1 overflow-y-auto p-6">
-             <div 
+             <div
                className="prose prose-sm max-w-none"
-               dangerouslySetInnerHTML={{ __html: previewEmail.html_body || '' }}
+               dangerouslySetInnerHTML={{ __html: sanitizeHtmlForPreview(previewEmail.html_body) }}
              />
            </div>
 

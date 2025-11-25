@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { buildWavFromFloat } from '../services/audioEncoding';
+import { useDialog } from '../context/DialogContext';
 
 const isUserMediaCancel = (error: unknown) => {
   if (!error) return false;
@@ -42,6 +43,12 @@ export const useAudioRecorder = () => {
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sampleRateRef = useRef<number>(16000);
   const ringBuffersRef = useRef<Float32Array[]>([]); // accumulation de frames mono
+  const { showAlert } = useDialog();
+  const alertRef = useRef(showAlert);
+
+  useEffect(() => {
+    alertRef.current = showAlert;
+  }, [showAlert]);
 
   const startRecording = useCallback(async (mode: 'microphone' | 'system' | 'visio' = 'microphone') => {
     try {
@@ -312,7 +319,11 @@ export const useAudioRecorder = () => {
         // Arrêter automatiquement après 4h (14400 secondes)
         if (elapsed >= 14400) {
           stopRecording();
-          alert('Enregistrement automatiquement arrêté après 4 heures (limite maximale)');
+          alertRef.current?.({
+            title: 'Limite atteinte',
+            message: 'Enregistrement automatiquement arrêté après 4 heures (limite maximale)',
+            variant: 'warning',
+          });
         }
       }, 1000);
     } catch (error) {
@@ -360,7 +371,11 @@ export const useAudioRecorder = () => {
         // Arrêter automatiquement après 4h (14400 secondes)
         if (elapsed >= 14400) {
           stopRecording();
-          alert('Enregistrement automatiquement arrêté après 4 heures (limite maximale)');
+          alertRef.current?.({
+            title: 'Limite atteinte',
+            message: 'Enregistrement automatiquement arrêté après 4 heures (limite maximale)',
+            variant: 'warning',
+          });
         }
       }, 1000);
     }

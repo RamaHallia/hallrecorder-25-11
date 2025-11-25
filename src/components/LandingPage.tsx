@@ -81,9 +81,9 @@ export const LandingPage = ({ onGetStarted }: LandingPageProps) => {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <img src="/image copy.png" alt="Logo" className="w-12 h-12 object-contain" />
+              <img src="/logohallia.png" alt="Logo" className="w-12 h-12 object-contain" />
               <span className="text-2xl font-bold bg-gradient-to-r from-coral-500 to-sunset-500 bg-clip-text text-transparent">
-                Meeting recorder
+                HALL Recorder
               </span>
             </div>
             <button
@@ -263,7 +263,7 @@ export const LandingPage = ({ onGetStarted }: LandingPageProps) => {
             Rejoignez des milliers de professionnels
           </h2>
           <p className="text-xl text-white/90 mb-10 max-w-2xl mx-auto">
-            Entrepreneurs, managers, consultants... Ils ont tous choisi Meeting Recorder pour optimiser leurs réunions et gagner un temps précieux.
+            Entrepreneurs, managers, consultants... Ils ont tous choisi HALL Recorder pour optimiser leurs réunions et gagner un temps précieux.
           </p>
           <button
             onClick={onGetStarted}
@@ -280,10 +280,10 @@ export const LandingPage = ({ onGetStarted }: LandingPageProps) => {
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
               <img src="/image copy.png" alt="Logo" className="w-10 h-10 object-contain" />
-              <span className="text-xl font-bold">Meeting Recorder</span>
+              <span className="text-xl font-bold">HALL Recorder</span>
             </div>
             <div className="text-center md:text-right text-cocoa-400">
-              <p>© 2024 Meeting Recorder. Tous droits réservés.</p>
+              <p>© 2024 HALL Recorder. Tous droits réservés.</p>
               <p className="text-sm mt-2">Propulsé par l'IA pour des réunions plus productives</p>
             </div>
           </div>

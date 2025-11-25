@@ -1,16 +1,20 @@
-import { ArrowLeft, Calendar, FileText, Mail, Plus, Trash2, Download, Upload, Copy, FileDown, Edit2, Save, X } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { ArrowLeft, Calendar, FileText, Mail, Plus, Trash2, Download, Upload, Copy, FileDown, Edit2, Save, X, AlertTriangle, Sparkles, RotateCw } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, EmailAttachment } from '../lib/supabase';
 import { generatePDFFromHTML } from '../services/pdfGenerator';
 import { EmailComposer } from './EmailComposer';
 import { generateEmailBody } from '../services/emailTemplates';
 import { SuccessModal } from './SuccessModal';
 import { WordCorrectionModal } from './WordCorrectionModal';
+import { useDialog } from '../context/DialogContext';
+import { SummaryMode, generateSummary } from '../services/transcription';
 
 interface MeetingResultProps {
   title: string;
   transcript: string;
-  summary: string;
+  summaryDetailed: string;
+  summaryShort: string;
+  defaultSummaryMode: SummaryMode;
   suggestions?: Array<{
     segment_number?: number;
     summary?: string;
@@ -21,11 +25,24 @@ interface MeetingResultProps {
   }>;
   userId: string;
   meetingId?: string;
+  summaryFailed?: boolean;
   onClose: () => void;
   onUpdate?: () => void;
 }
 
-export const MeetingResult = ({ title, transcript, summary, suggestions = [], userId, meetingId, onClose, onUpdate }: MeetingResultProps) => {
+export const MeetingResult = ({
+  title,
+  transcript,
+  summaryDetailed,
+  summaryShort,
+  defaultSummaryMode,
+  suggestions = [],
+  userId,
+  meetingId,
+  summaryFailed = false,
+  onClose,
+  onUpdate,
+}: MeetingResultProps) => {
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'suggestions'>('summary');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [showEmailComposer, setShowEmailComposer] = useState(false);
@@ -40,12 +57,106 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
   const [initialEmailBody, setInitialEmailBody] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(title);
-  const [editedSummary, setEditedSummary] = useState(summary);
   const [editedTranscript, setEditedTranscript] = useState(transcript);
+  const [activeSummaryMode, setActiveSummaryMode] = useState<SummaryMode>(defaultSummaryMode || 'detailed');
+  const [summaries, setSummaries] = useState<{ detailed: string; short: string }>({
+    detailed: summaryDetailed,
+    short: summaryShort,
+  });
+  const [editedSummaries, setEditedSummaries] = useState<{ detailed: string; short: string }>({
+    detailed: summaryDetailed,
+    short: summaryShort,
+  });
   const [senderName, setSenderName] = useState('');
   const [signatureText, setSignatureText] = useState('');
   const [signatureLogoUrl, setSignatureLogoUrl] = useState('');
-  const summaryRef = React.useRef<HTMLDivElement>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const { showAlert } = useDialog();
+  const currentSummaryText = (isEditing ? editedSummaries : summaries)[activeSummaryMode] || '';
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [localSummaryFailed, setLocalSummaryFailed] = useState(summaryFailed);
+
+  // Fonction pour générer le résumé si la génération avait échoué
+  const handleGenerateSummary = async () => {
+    if (!transcript || !transcript.trim()) {
+      await showAlert({
+        title: 'Transcription introuvable',
+        message: 'La transcription est introuvable pour cette réunion.',
+        variant: 'danger',
+      });
+      return;
+    }
+
+    if (!meetingId) {
+      await showAlert({
+        title: 'Erreur',
+        message: 'ID de réunion manquant.',
+        variant: 'danger',
+      });
+      return;
+    }
+
+    try {
+      setIsGeneratingSummary(true);
+
+      // Générer les deux versions du résumé
+      const [detailedResult, shortResult] = await Promise.all([
+        generateSummary(transcript, userId, 0, 'detailed'),
+        generateSummary(transcript, userId, 0, 'short'),
+      ]);
+
+      const detailedSummary = detailedResult.summary || '';
+      const shortSummary = shortResult.summary || '';
+      const finalTitle = detailedResult.title?.trim() || shortResult.title?.trim() || title;
+
+      // Mettre à jour la réunion dans la base de données
+      const { error } = await supabase
+        .from('meetings')
+        .update({
+          title: finalTitle,
+          summary: defaultSummaryMode === 'short' ? shortSummary : detailedSummary,
+          summary_detailed: detailedSummary,
+          summary_short: shortSummary,
+          summary_failed: false,
+        })
+        .eq('id', meetingId);
+
+      if (error) {
+        throw error;
+      }
+
+      // Mettre à jour l'état local
+      setEditedTitle(finalTitle);
+      setSummaries({ detailed: detailedSummary, short: shortSummary });
+      setEditedSummaries({ detailed: detailedSummary, short: shortSummary });
+      setLocalSummaryFailed(false);
+
+      await showAlert({
+        title: 'Résumé généré',
+        message: 'Le résumé a été généré avec succès !',
+        variant: 'success',
+      });
+
+      if (onUpdate) onUpdate();
+    } catch (err: any) {
+      console.error('Erreur lors de la génération du résumé:', err);
+      await showAlert({
+        title: 'Erreur',
+        message: err?.message || 'Impossible de générer le résumé. Veuillez réessayer.',
+        variant: 'danger',
+      });
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
+  useEffect(() => {
+    setEditedTitle(title);
+    setEditedTranscript(transcript);
+    setSummaries({ detailed: summaryDetailed, short: summaryShort });
+    setEditedSummaries({ detailed: summaryDetailed, short: summaryShort });
+    setActiveSummaryMode(defaultSummaryMode || 'detailed');
+  }, [title, transcript, summaryDetailed, summaryShort, defaultSummaryMode]);
 
   // Charger les paramètres utilisateur
   const handleWordDoubleClick = (e: React.MouseEvent) => {
@@ -130,17 +241,34 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
 
     let updatedText = '';
     if (activeTab === 'summary') {
+      const sourceSummaries = isEditing ? editedSummaries : summaries;
+      const baseText = sourceSummaries[activeSummaryMode] || '';
       updatedText = replaceAll
-        ? editedSummary.replace(new RegExp(`\\b${selectedWord}\\b`, 'gi'), newWord)
-        : editedSummary.replace(selectedWord, newWord);
+        ? baseText.replace(new RegExp(`\\b${selectedWord}\\b`, 'gi'), newWord)
+        : baseText.replace(selectedWord, newWord);
 
       console.log('📝 Mise à jour du résumé');
-      setEditedSummary(updatedText);
+
+      const updatedSummaries =
+        activeSummaryMode === 'detailed'
+          ? { detailed: updatedText, short: sourceSummaries.short }
+          : { detailed: sourceSummaries.detailed, short: updatedText };
+
+      if (isEditing) {
+        setEditedSummaries(updatedSummaries);
+      } else {
+        setSummaries(updatedSummaries);
+      }
 
       if (meetingId) {
         await supabase
           .from('meetings')
-          .update({ summary: updatedText })
+          .update({
+            summary: activeSummaryMode === 'short' ? updatedSummaries.short : updatedSummaries.detailed,
+            summary_detailed: updatedSummaries.detailed,
+            summary_short: updatedSummaries.short,
+            summary_mode: activeSummaryMode,
+          })
           .eq('id', meetingId);
 
         console.log('✅ Résumé sauvegardé dans la base de données');
@@ -224,11 +352,15 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
       console.log('🗑️ MeetingResult: Suppression du listener double-clic');
       document.removeEventListener('dblclick', handleDblClick);
     };
-  }, [editedSummary, editedTranscript, activeTab]);
+  }, [editedSummaries.detailed, editedSummaries.short, editedTranscript, activeTab]);
 
   const handleSave = async () => {
     if (!meetingId) {
-      alert('Impossible de sauvegarder : ID de réunion manquant');
+      await showAlert({
+        title: 'Sauvegarde impossible',
+        message: 'Impossible de sauvegarder : ID de réunion manquant',
+        variant: 'warning',
+      });
       return;
     }
 
@@ -237,35 +369,52 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
         .from('meetings')
         .update({
           title: editedTitle,
-          summary: editedSummary,
+          summary: editedSummaries[activeSummaryMode] || '',
+          summary_detailed: editedSummaries.detailed || '',
+          summary_short: editedSummaries.short || '',
+          summary_mode: activeSummaryMode,
           display_transcript: editedTranscript,
         })
         .eq('id', meetingId);
 
       if (error) throw error;
 
+      setSummaries(editedSummaries);
       setIsEditing(false);
       if (onUpdate) onUpdate();
-      alert('✓ Modifications enregistrées');
+      await showAlert({
+        title: 'Modifications enregistrées',
+        message: '✓ Modifications enregistrées',
+        variant: 'success',
+      });
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
-      alert('Erreur lors de la sauvegarde');
+      await showAlert({
+        title: 'Erreur lors de la sauvegarde',
+        message: 'Erreur lors de la sauvegarde',
+        variant: 'danger',
+      });
     }
   };
 
   const handleCancelEdit = () => {
     setEditedTitle(title);
-    setEditedSummary(summary);
+    setEditedSummaries({ detailed: summaryDetailed, short: summaryShort });
     setEditedTranscript(transcript);
+    setActiveSummaryMode(defaultSummaryMode || 'detailed');
     setIsEditing(false);
   };
 
   const handleDownloadPDF = async () => {
     try {
-      await generatePDFFromHTML(editedTitle, editedSummary);
+      await generatePDFFromHTML(editedTitle, currentSummaryText);
     } catch (error) {
       console.error('Erreur lors de la génération du PDF:', error);
-      alert('Erreur lors de la génération du PDF. Veuillez réessayer.');
+      await showAlert({
+        title: 'Erreur PDF',
+        message: 'Erreur lors de la génération du PDF. Veuillez réessayer.',
+        variant: 'danger',
+      });
     }
   };
 
@@ -281,13 +430,17 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
   };
 
   const handleCopyReport = async () => {
-    const report = `${editedTitle}\n\n${editedSummary}`;
+    const report = `${editedTitle}\n\n${currentSummaryText}`;
     try {
       await navigator.clipboard.writeText(report);
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     } catch (err) {
-      alert('Erreur lors de la copie');
+      await showAlert({
+        title: 'Erreur de copie',
+        message: 'Erreur lors de la copie',
+        variant: 'danger',
+      });
     }
   };
 
@@ -299,7 +452,7 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
     return await generateEmailBody({
       title: editedTitle,
       date: formatDate(),
-      summary: editedSummary,
+      summary: currentSummaryText,
       attachments: [],
       senderName,
       signatureText,
@@ -317,12 +470,38 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
     htmlBody: string;
     textBody: string;
     attachments: EmailAttachment[];
+    method: 'gmail' | 'smtp' | 'app';
   }) => {
     setIsSendingEmail(true);
 
-    console.log('🔍 Email method actuel:', emailMethod);
+    // Utiliser la méthode sélectionnée dans le composeur
+    const selectedMethod = emailData.method === 'app' ? 'local' : emailData.method;
+    console.log('📥 MeetingResult - emailData.method reçu:', emailData.method);
+    console.log('🔍 MeetingResult - selectedMethod final:', selectedMethod);
 
     try {
+      // 🎯 NOUVELLE APPROCHE: Envoi individuel pour tracking précis
+      const { sendIndividualEmails } = await import('../services/individualEmailSender');
+
+      const result = await sendIndividualEmails(
+        emailData,
+        selectedMethod as 'smtp' | 'gmail' | 'local',
+        meetingId,
+        userId
+      );
+
+      if (!result.success && result.failed.length > 0) {
+        throw new Error(`Échec d'envoi pour : ${result.failed.join(', ')}`);
+      }
+
+      setSuccessMessage(`${result.totalSent} email(s) envoyé(s) avec tracking individuel !`);
+      setShowSuccessModal(true);
+      setShowEmailComposer(false);
+      
+      console.log(`✅ ${result.totalSent} emails envoyés individuellement pour tracking précis`);
+      return;
+
+      /* CODE ANCIEN - REMPLACÉ PAR sendIndividualEmails()
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const trackingId = crypto.randomUUID();
       const allRecipientsRaw = [
@@ -521,16 +700,15 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
         link.click();
 
         setShowEmailComposer(false);
-
-        // Petit délai pour s'assurer que le modal s'affiche après la fermeture du composer
-        setTimeout(() => {
-          setSuccessMessage('Votre client email local a été ouvert. Veuillez finaliser l\'envoi.');
-          setShowSuccessModal(true);
-        }, 100);
       }
+      FIN CODE ANCIEN COMMENTÉ */
     } catch (error: any) {
       console.error('Erreur lors de l\'envoi de l\'email:', error);
-      alert(`❌ Erreur lors de l'envoi de l'email:\n${error.message}\n\n${emailMethod === 'smtp' ? 'Vérifiez votre configuration SMTP dans les Paramètres.' : ''}`);
+      await showAlert({
+        title: 'Erreur lors de l\'envoi',
+        message: `❌ Erreur lors de l'envoi de l'email:\n${error.message}\n\n${emailMethod === 'smtp' ? 'Vérifiez votre configuration SMTP dans les Paramètres.' : ''}`,
+        variant: 'danger',
+      });
     } finally {
       setIsSendingEmail(false);
     }
@@ -916,10 +1094,70 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
         <div className="overflow-y-auto p-4 md:p-10 flex-1 flex justify-center">
           {activeTab === 'summary' ? (
             <div className="w-full max-w-5xl">
+              {/* Avertissement si la génération de résumé avait échoué */}
+              {localSummaryFailed && (
+                <div className="mb-6 bg-gradient-to-br from-amber-50 to-orange-100 rounded-2xl p-6 border-2 border-amber-300">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-lg font-bold text-amber-800 mb-2">Résumé non généré</h4>
+                      <p className="text-amber-700 mb-4">
+                        La génération du résumé a échoué lors de l'enregistrement, mais votre transcription a été sauvegardée.
+                        Cliquez sur le bouton ci-dessous pour générer le résumé maintenant.
+                      </p>
+                      <button
+                        onClick={handleGenerateSummary}
+                        disabled={isGeneratingSummary}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors font-semibold disabled:opacity-50"
+                      >
+                        {isGeneratingSummary ? (
+                          <>
+                            <RotateCw className="w-4 h-4 animate-spin" />
+                            Génération en cours...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            Générer le résumé maintenant
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <button
+                  onClick={() => setActiveSummaryMode('detailed')}
+                  className={`px-4 py-2 rounded-full border text-sm font-semibold transition-all ${
+                    activeSummaryMode === 'detailed'
+                      ? 'bg-coral-100 text-coral-700 border-coral-300 shadow-sm'
+                      : 'text-cocoa-500 border-cocoa-200 hover:border-coral-200 hover:text-coral-600'
+                  }`}
+                >
+                  Résumé détaillé
+                </button>
+                <button
+                  onClick={() => setActiveSummaryMode('short')}
+                  className={`px-4 py-2 rounded-full border text-sm font-semibold transition-all ${
+                    activeSummaryMode === 'short'
+                      ? 'bg-orange-100 text-orange-700 border-orange-300 shadow-sm'
+                      : 'text-cocoa-500 border-cocoa-200 hover:border-orange-200 hover:text-orange-600'
+                  }`}
+                >
+                  Résumé court
+                </button>
+              </div>
               {isEditing ? (
                 <textarea
-                  value={editedSummary}
-                  onChange={(e) => setEditedSummary(e.target.value)}
+                  value={editedSummaries[activeSummaryMode] || ''}
+                  onChange={(e) =>
+                    setEditedSummaries((prev) => ({
+                      ...prev,
+                      [activeSummaryMode]: e.target.value,
+                    }))
+                  }
                   className="w-full min-h-[400px] p-6 border-2 border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-coral-500 focus:border-coral-500 text-cocoa-800 text-lg leading-relaxed"
                 />
               ) : (
@@ -928,7 +1166,7 @@ export const MeetingResult = ({ title, transcript, summary, suggestions = [], us
                     ref={summaryRef}
                     className="text-cocoa-800 whitespace-pre-wrap leading-relaxed text-lg cursor-text"
                   >
-                    {renderSummaryWithBold(editedSummary)}
+                    {renderSummaryWithBold(currentSummaryText)}
                   </div>
                 </div>
               )}

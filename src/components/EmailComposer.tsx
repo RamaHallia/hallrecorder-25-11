@@ -4,6 +4,7 @@ import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import './EmailComposer.css';
 import { EmailAttachment, supabase } from '../lib/supabase';
+import { useDialog } from '../context/DialogContext';
 
 interface Recipient {
   email: string;
@@ -24,9 +25,11 @@ interface EmailComposerProps {
     htmlBody: string;
     textBody: string;
     attachments: EmailAttachment[];
+    method: 'gmail' | 'smtp' | 'app';
   }) => Promise<void>;
   onClose: () => void;
   isSending: boolean;
+  onMethodChange?: (method: 'gmail' | 'smtp' | 'app') => void;
 }
 
 export function EmailComposer({
@@ -39,6 +42,7 @@ export function EmailComposer({
   onSend,
   onClose,
   isSending,
+  onMethodChange,
 }: EmailComposerProps) {
   console.log('📧 EmailComposer render - initialBody length:', initialBody.length);
   console.log('📧 EmailComposer render - has img tag:', initialBody.includes('<img'));
@@ -54,13 +58,39 @@ export function EmailComposer({
   const [attachments, setAttachments] = useState<EmailAttachment[]>(initialAttachments);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [emailMethod, setEmailMethod] = useState<'gmail' | 'smtp' | 'app'>('app');
+  const [availableMethods, setAvailableMethods] = useState<{ gmail: boolean; smtp: boolean }>({ gmail: false, smtp: false });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { showAlert } = useDialog();
 
   // Contact Groups
   const [contactGroups, setContactGroups] = useState<Array<{ id: string; name: string; contacts: Array<{ name: string; email: string }> }>>([]);
   const [showGroupSelector, setShowGroupSelector] = useState(false);
 
   const quillRef = useRef<ReactQuill>(null);
+
+  // Fonction pour changer de méthode d'envoi
+  const handleMethodChange = (method: 'gmail' | 'smtp' | 'app') => {
+    // Vérifier si la méthode est disponible
+    if (method === 'gmail' && !availableMethods.gmail) {
+      showAlert({
+        title: 'Gmail non configuré',
+        message: 'Veuillez connecter votre compte Gmail dans les Paramètres pour utiliser cette méthode.',
+        variant: 'warning',
+      });
+      return;
+    }
+    if (method === 'smtp' && !availableMethods.smtp) {
+      showAlert({
+        title: 'SMTP non configuré',
+        message: 'Veuillez configurer votre serveur SMTP dans les Paramètres pour utiliser cette méthode.',
+        variant: 'warning',
+      });
+      return;
+    }
+
+    setEmailMethod(method);
+    onMethodChange?.(method);
+  };
 
   // Charger la méthode d'envoi configurée et les groupes de contacts
   useEffect(() => {
@@ -75,6 +105,12 @@ export function EmailComposer({
         .maybeSingle();
 
       if (data) {
+        // Stocker les méthodes disponibles
+        setAvailableMethods({
+          gmail: !!data.gmail_connected,
+          smtp: !!data.smtp_host,
+        });
+
         if (data.email_method === 'gmail' && data.gmail_connected) {
           setEmailMethod('gmail');
         } else if (data.email_method === 'smtp' && data.smtp_host) {
@@ -84,6 +120,7 @@ export function EmailComposer({
         }
       } else {
         setEmailMethod('app');
+        setAvailableMethods({ gmail: false, smtp: false });
       }
     };
 
@@ -264,7 +301,11 @@ export function EmailComposer({
     for (const file of filesArray) {
       console.log('📤 Upload - Fichier:', file.name, 'Taille:', file.size, 'Type:', file.type);
       if (file.size > 10 * 1024 * 1024) {
-        alert(`❌ Le fichier "${file.name}" est trop volumineux. Taille maximale: 10 MB`);
+        await showAlert({
+          title: 'Fichier trop volumineux',
+          message: `❌ Le fichier "${file.name}" est trop volumineux. Taille maximale: 10 MB`,
+          variant: 'warning',
+        });
         return;
       }
     }
@@ -319,7 +360,11 @@ export function EmailComposer({
       }
     } catch (error) {
       console.error('❌ Erreur lors du téléchargement:', error);
-      alert('❌ Erreur lors du téléchargement des fichiers');
+      await showAlert({
+        title: 'Erreur de téléchargement',
+        message: '❌ Erreur lors du téléchargement des fichiers',
+        variant: 'danger',
+      });
     } finally {
       setIsUploadingAttachment(false);
     }
@@ -399,12 +444,20 @@ export function EmailComposer({
     // Validation
     const validRecipients = recipients.filter(r => r.email.trim());
     if (validRecipients.length === 0) {
-      alert('❌ Veuillez ajouter au moins un destinataire');
+      await showAlert({
+        title: 'Destinataires requis',
+        message: '❌ Veuillez ajouter au moins un destinataire',
+        variant: 'warning',
+      });
       return;
     }
 
     if (!subject.trim()) {
-      alert('❌ Veuillez saisir un objet');
+      await showAlert({
+        title: 'Objet requis',
+        message: '❌ Veuillez saisir un objet',
+        variant: 'warning',
+      });
       return;
     }
 
@@ -414,6 +467,7 @@ export function EmailComposer({
     // Forcer la taille du logo à 30px dans le HTML
     const fixedHtmlBody = fixLogoSize(body);
 
+    console.log('📤 EmailComposer - Envoi avec méthode:', emailMethod);
     await onSend({
       recipients: validRecipients,
       ccRecipients: validCcRecipients,
@@ -422,6 +476,7 @@ export function EmailComposer({
       htmlBody: fixedHtmlBody,
       textBody: htmlToPlainText(body),
       attachments,
+      method: emailMethod,
     });
   };
 
@@ -438,36 +493,65 @@ export function EmailComposer({
               <h2 className="text-2xl font-bold">Nouveau message</h2>
               <p className="text-sm text-white/80">Composez et envoyez votre email</p>
             </div>
-            {emailMethod && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-white/20 rounded-lg text-sm font-medium">
-                {emailMethod === 'gmail' ? (
-                  <>
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/>
-                    </svg>
-                    Gmail
-                  </>
-                ) : emailMethod === 'smtp' ? (
-                  <>
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="2" y="4" width="20" height="16" rx="2"/>
-                      <path d="m2 7 10 7 10-7"/>
-                    </svg>
-                    SMTP
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 4h16v16H4z" />
-                      <path d="M8 2v4" />
-                      <path d="M16 2v4" />
-                      <path d="M9 14h6" />
-                    </svg>
-                    Application client
-                  </>
-                )}
-              </div>
-            )}
+            {/* Sélecteur de méthode d'envoi */}
+            <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1">
+              {/* Gmail */}
+              <button
+                onClick={() => handleMethodChange('gmail')}
+                disabled={isSending}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  emailMethod === 'gmail'
+                    ? 'bg-white text-red-600 shadow-md'
+                    : availableMethods.gmail
+                      ? 'text-white/80 hover:bg-white/20'
+                      : 'text-white/40 cursor-not-allowed'
+                }`}
+                title={availableMethods.gmail ? 'Envoyer via Gmail' : 'Gmail non configuré'}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/>
+                </svg>
+                {emailMethod === 'gmail' && 'Gmail'}
+              </button>
+
+              {/* SMTP */}
+              <button
+                onClick={() => handleMethodChange('smtp')}
+                disabled={isSending}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  emailMethod === 'smtp'
+                    ? 'bg-white text-blue-600 shadow-md'
+                    : availableMethods.smtp
+                      ? 'text-white/80 hover:bg-white/20'
+                      : 'text-white/40 cursor-not-allowed'
+                }`}
+                title={availableMethods.smtp ? 'Envoyer via SMTP' : 'SMTP non configuré'}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="2" y="4" width="20" height="16" rx="2"/>
+                  <path d="m2 7 10 7 10-7"/>
+                </svg>
+                {emailMethod === 'smtp' && 'SMTP'}
+              </button>
+
+              {/* App locale */}
+              <button
+                onClick={() => handleMethodChange('app')}
+                disabled={isSending}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  emailMethod === 'app'
+                    ? 'bg-white text-gray-700 shadow-md'
+                    : 'text-white/80 hover:bg-white/20'
+                }`}
+                title="Ouvrir dans l'application email"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="5" width="18" height="14" rx="2"/>
+                  <path d="m3 7 9 6 9-6"/>
+                </svg>
+                {emailMethod === 'app' && 'App'}
+              </button>
+            </div>
           </div>
           <button
             onClick={onClose}

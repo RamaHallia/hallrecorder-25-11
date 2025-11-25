@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Mail, Lock, LogIn, UserPlus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { ForgotPasswordModal } from './ForgotPasswordModal';
 
 interface LoginProps {
   onSuccess: () => void;
@@ -13,6 +14,7 @@ export const Login = ({ onSuccess }: LoginProps) => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +28,7 @@ export const Login = ({ onSuccess }: LoginProps) => {
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/`,
+            emailRedirectTo: `${window.location.origin}/#record`,
           },
         });
 
@@ -59,10 +61,10 @@ export const Login = ({ onSuccess }: LoginProps) => {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-6">
-            <img src="/image copy.png" alt="Logo" className="w-20 h-20 object-contain" />
+            <img src="/logohallia.png" alt="Logo" className="w-20 h-20 object-contain" />
           </div>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-coral-500 to-sunset-500 bg-clip-text text-transparent mb-2">
-            Meeting recorder
+            HALL Recorder
           </h1>
           <p className="text-cocoa-600 text-lg">
             {isSignUp ? 'Créez votre compte' : 'Connectez-vous à votre compte'}
@@ -109,6 +111,17 @@ export const Login = ({ onSuccess }: LoginProps) => {
               {isSignUp && (
                 <p className="mt-2 text-xs text-cocoa-500">Minimum 6 caractères</p>
               )}
+              {!isSignUp && (
+                <div className="mt-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(true)}
+                    className="text-sm text-coral-600 hover:text-coral-700 font-medium transition-colors"
+                  >
+                    Mot de passe oublié ?
+                  </button>
+                </div>
+              )}
             </div>
 
             {message && (
@@ -153,6 +166,10 @@ export const Login = ({ onSuccess }: LoginProps) => {
           </div>
         </div>
       </div>
+
+      {showForgotPassword && (
+        <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />
+      )}
     </div>
   );
 };

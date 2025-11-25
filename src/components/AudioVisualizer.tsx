@@ -19,17 +19,24 @@ export const AudioVisualizer = ({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const freqBufferRef = useRef<Uint8Array | null>(null);
+  const prevHeightsRef = useRef<number[]>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // Utiliser le DPI natif complet pour un rendu cristallin
+    const dpr = window.devicePixelRatio || 1;
     const resize = () => {
-      const cssWidth = canvas.clientWidth || 600;
-      const cssHeight = 140;
-      canvas.width = Math.floor(cssWidth * dpr);
-      canvas.height = Math.floor(cssHeight * dpr);
+      const rect = canvas.getBoundingClientRect();
+      const cssWidth = rect.width || 600;
+      const cssHeight = 160;
+      // Canvas haute résolution
+      canvas.width = Math.round(cssWidth * dpr);
+      canvas.height = Math.round(cssHeight * dpr);
+      // Garder la taille CSS
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
     };
     resize();
 
@@ -46,9 +53,10 @@ export const AudioVisualizer = ({
     audioContextRef.current = audioCtx;
 
     const analyser = audioCtx.createAnalyser();
-    // FFT plus grande pour plus de précision, et smoothing modéré pour la réactivité
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.75;
+    // FFT maximale pour une précision extrême
+    analyser.fftSize = 4096;
+    // Smoothing réduit pour plus de réactivité
+    analyser.smoothingTimeConstant = 0.6;
     analyserRef.current = analyser;
 
     if (stream.getAudioTracks().length === 0) {
@@ -61,51 +69,93 @@ export const AudioVisualizer = ({
     source.connect(analyser);
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d')!;
-    // Buffer de fréquences pour des barres claires et nettes
+    const ctx = canvas.getContext('2d', { alpha: true })!;
+
+    // Activer l'anti-aliasing et le lissage pour les formes
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
     const freqData = new Uint8Array(analyser.frequencyBinCount);
     freqBufferRef.current = freqData;
 
+    // Nombre de barres fixe pour un rendu constant
+    const BAR_COUNT = 80;
+
+    // Initialiser les hauteurs précédentes pour l'animation fluide
+    if (prevHeightsRef.current.length !== BAR_COUNT) {
+      prevHeightsRef.current = new Array(BAR_COUNT).fill(0);
+    }
+
     const draw = () => {
+      const dpr = window.devicePixelRatio || 1;
       const w = canvas.width;
       const h = canvas.height;
-      const mid = Math.floor(h / 2) + 0.5; // alignement pixel parfait
+      const mid = h / 2;
 
-      // Nettoyage complet
+      // Fond transparent
       ctx.clearRect(0, 0, w, h);
 
-      // Récupérer les fréquences
+      // Récupérer les données de fréquence
       analyser.getByteFrequencyData(freqData);
 
-      // Paramètres des barres (scalés pour Hi-DPI)
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const barWidth = Math.max(2, Math.floor(3 * dpr));
-      const gap = Math.max(1, Math.floor(2 * dpr));
-      const total = Math.floor(w / (barWidth + gap));
+      // Calcul des dimensions des barres
+      const totalBarSpace = w * 0.95; // 95% de largeur utilisée
+      const barWidth = Math.round((totalBarSpace / BAR_COUNT) * 0.7);
+      const gap = Math.round((totalBarSpace / BAR_COUNT) * 0.3);
+      const startX = (w - (BAR_COUNT * (barWidth + gap) - gap)) / 2;
 
-      // Nombre d'échantillons à agréger par barre
-      const step = Math.max(1, Math.floor(freqData.length / total));
+      // Nombre de bins de fréquence par barre (focus sur les basses/moyennes)
+      const usableBins = Math.floor(freqData.length * 0.6); // 60% des bins (basses/moyennes fréquences)
+      const binsPerBar = Math.floor(usableBins / BAR_COUNT);
 
-      ctx.fillStyle = barColor as any; // couleur unie, pas de dégradé
-
-      for (let i = 0; i < total; i++) {
-        // Moyenne locale pour un rendu stable
+      for (let i = 0; i < BAR_COUNT; i++) {
+        // Calculer la moyenne des fréquences pour cette barre
         let sum = 0;
-        for (let j = 0; j < step; j++) {
-          sum += freqData[i * step + j] || 0;
+        let count = 0;
+        const startBin = i * binsPerBar;
+        const endBin = Math.min(startBin + binsPerBar, usableBins);
+
+        for (let j = startBin; j < endBin; j++) {
+          sum += freqData[j];
+          count++;
         }
-        const value = sum / step; // 0..255
-        // Hauteur proportionnelle, avec une légère courbe pour l'œil
-        const norm = Math.pow(value / 255, 0.9);
-        const barH = Math.max(2, Math.floor(norm * (h * 0.9)));
 
-        const x = Math.floor(i * (barWidth + gap)) + 0.5; // alignement net
-        const yTop = mid - barH;
-        const yBottom = mid;
+        const avgValue = count > 0 ? sum / count : 0;
 
-        // Barres miroir (haut et bas) pour un style pro
-        ctx.fillRect(x, yTop, barWidth, barH);
-        ctx.fillRect(x, yBottom, barWidth, barH);
+        // Normalisation avec courbe pour plus de dynamisme
+        const normalized = Math.pow(avgValue / 255, 0.85);
+
+        // Hauteur cible
+        const maxBarHeight = (h * 0.42);
+        const targetHeight = Math.max(2 * dpr, normalized * maxBarHeight);
+
+        // Animation fluide avec interpolation
+        const prevHeight = prevHeightsRef.current[i];
+        const smoothingFactor = targetHeight > prevHeight ? 0.3 : 0.15; // Monte vite, descend doucement
+        const currentHeight = prevHeight + (targetHeight - prevHeight) * smoothingFactor;
+        prevHeightsRef.current[i] = currentHeight;
+
+        const x = startX + i * (barWidth + gap);
+
+        // Créer un dégradé vertical pour chaque barre
+        const gradient = ctx.createLinearGradient(0, mid - currentHeight, 0, mid + currentHeight);
+        const intensity = Math.min(1, normalized * 1.5);
+
+        // Dégradé du coral vers le sunset avec opacité basée sur l'intensité
+        gradient.addColorStop(0, `rgba(255, 107, 74, ${0.3 + intensity * 0.7})`);
+        gradient.addColorStop(0.5, `rgba(255, 87, 51, ${0.5 + intensity * 0.5})`);
+        gradient.addColorStop(1, `rgba(255, 107, 74, ${0.3 + intensity * 0.7})`);
+
+        ctx.fillStyle = gradient;
+
+        // Dessiner avec coins arrondis pour un look premium
+        const radius = Math.min(barWidth / 2, 3 * dpr);
+
+        // Barre du haut (vers le haut depuis le milieu)
+        drawRoundedRect(ctx, x, mid - currentHeight, barWidth, currentHeight, radius, 'top');
+
+        // Barre du bas (vers le bas depuis le milieu) - miroir
+        drawRoundedRect(ctx, x, mid, barWidth, currentHeight, radius, 'bottom');
       }
 
       animationRef.current = requestAnimationFrame(draw);
@@ -125,15 +175,58 @@ export const AudioVisualizer = ({
     <div className="flex justify-center items-center w-full py-4 px-2 rounded-xl" style={{ background: bgColor }}>
       <canvas
         ref={canvasRef}
-        className="rounded-lg w-full h-[140px]"
-        style={{ display: isActive ? 'block' : 'none', maxWidth: '100%' }}
+        className="rounded-lg w-full"
+        style={{
+          display: isActive ? 'block' : 'none',
+          maxWidth: '100%',
+          height: '160px',
+        }}
       />
       {!isActive && (
-        <div className="flex items-center justify-center h-[140px] w-full text-cocoa-500/70 text-sm">
+        <div className="flex items-center justify-center h-[160px] w-full text-cocoa-500/70 text-sm">
           Visualisation en pause
         </div>
       )}
     </div>
   );
 };
+
+// Fonction helper pour dessiner des rectangles avec coins arrondis
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+  roundSide: 'top' | 'bottom' | 'both'
+) {
+  ctx.beginPath();
+
+  if (roundSide === 'top') {
+    // Coins arrondis en haut seulement
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height);
+    ctx.lineTo(x, y + height);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+  } else if (roundSide === 'bottom') {
+    // Coins arrondis en bas seulement
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + width, y);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y);
+  } else {
+    // Tous les coins arrondis
+    ctx.roundRect(x, y, width, height, radius);
+  }
+
+  ctx.closePath();
+  ctx.fill();
+}
 

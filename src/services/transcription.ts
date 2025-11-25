@@ -3,6 +3,8 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const TRANSCRIBE_URL = import.meta.env.VITE_TRANSCRIBE_URL;
 const TRANSCRIBE_LONG_URL = import.meta.env.VITE_TRANSCRIBE_LONG_URL;
 
+export type SummaryMode = 'short' | 'detailed';
+
 export const transcribeAudio = async (audioBlob: Blob, retryCount = 0, filename?: string): Promise<string> => {
   const formData = new FormData();
   const ext = audioBlob.type.includes('wav') ? 'wav' : audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mpeg') || audioBlob.type.includes('mp3') ? 'mp3' : 'm4a';
@@ -102,8 +104,13 @@ export const transcribeLongAudio = async (
   }
 };
 
-export const generateSummary = async (transcript: string, userId?: string, retryCount = 0): Promise<{ title: string; summary: string }> => {
-  console.log('🔄 generateSummary appelé - Transcript length:', transcript.length, 'Retry:', retryCount);
+export const generateSummary = async (
+  transcript: string,
+  userId?: string,
+  retryCount = 0,
+  summaryMode: SummaryMode = 'detailed'
+): Promise<{ title: string; summary: string }> => {
+  console.log('🔄 generateSummary appelé - Transcript length:', transcript.length, 'Retry:', retryCount, 'Mode:', summaryMode);
 
   try {
     const response = await fetch(
@@ -114,7 +121,7 @@ export const generateSummary = async (transcript: string, userId?: string, retry
           'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ transcript, userId }),
+        body: JSON.stringify({ transcript, userId, summaryMode }),
       }
     );
 
@@ -130,7 +137,7 @@ export const generateSummary = async (transcript: string, userId?: string, retry
         console.log(`⏳ Rate limit détecté, retry dans ${delay}ms`);
 
         await new Promise(resolve => setTimeout(resolve, delay));
-        return generateSummary(transcript, userId, retryCount + 1);
+        return generateSummary(transcript, userId, retryCount + 1, summaryMode);
       }
       
       throw new Error(error.error || `Summary generation failed (${response.status})`);
@@ -146,7 +153,7 @@ export const generateSummary = async (transcript: string, userId?: string, retry
       console.log(`⏳ Retry dans ${delay}ms`);
 
       await new Promise(resolve => setTimeout(resolve, delay));
-      return generateSummary(transcript, userId, retryCount + 1);
+      return generateSummary(transcript, userId, retryCount + 1, summaryMode);
     }
     throw error;
   }

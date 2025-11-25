@@ -1,11 +1,14 @@
-import { ArrowLeft, Calendar, Clock, Edit2, FileText, Mail, Save, X, Paperclip, Download, FileDown } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Calendar, Clock, Edit2, FileText, Mail, Save, X, Paperclip, Download, FileDown, RotateCw, Sparkles, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Meeting, EmailAttachment, supabase } from '../lib/supabase';
 import { generatePDFFromHTML } from '../services/pdfGenerator';
 import { EmailComposer } from './EmailComposer';
 import { generateEmailBody } from '../services/emailTemplates';
 import { EmailSuccessModal } from './EmailSuccessModal';
 import { WordCorrectionModal } from './WordCorrectionModal';
+import { SummaryMode, generateSummary } from '../services/transcription';
+import { SummaryRegenerationModal } from './SummaryRegenerationModal';
+import { useDialog } from '../context/DialogContext';
 
 interface MeetingDetailProps {
   meeting: Meeting;
@@ -13,11 +16,20 @@ interface MeetingDetailProps {
   onUpdate: () => void;
 }
 
+const inferSummaryValues = (meeting: Meeting) => {
+  const base = meeting.summary || '';
+  return {
+    detailed: meeting.summary_detailed ?? base,
+    short: meeting.summary_short ?? base,
+  };
+};
+
 export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps) => {
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'suggestions'>('summary');
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(meeting.title);
-  const [editedSummary, setEditedSummary] = useState(meeting.summary || '');
+  const [activeSummaryMode, setActiveSummaryMode] = useState<SummaryMode>((meeting.summary_mode as SummaryMode) || 'detailed');
+  const [editedSummaries, setEditedSummaries] = useState(() => inferSummaryValues(meeting));
   const [editedTranscript, setEditedTranscript] = useState(meeting.display_transcript || meeting.transcript || '');
   const [editedNotes, setEditedNotes] = useState(meeting.notes || '');
   const [showEmailComposer, setShowEmailComposer] = useState(false);
@@ -40,8 +52,44 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
   const [showWordCorrection, setShowWordCorrection] = useState(false);
   const [selectedWord, setSelectedWord] = useState('');
   const [wordPosition, setWordPosition] = useState<{ start: number; end: number; text: string } | null>(null);
+  const [showRegenerationModal, setShowRegenerationModal] = useState(false);
+  const [regenerationMode, setRegenerationMode] = useState<SummaryMode>('detailed');
+  const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
+  const [regenerationError, setRegenerationError] = useState<string | null>(null);
+  const [isGeneratingFailedSummary, setIsGeneratingFailedSummary] = useState(false);
+  const canRegenerateSummary = useMemo(() => !meeting.summary_regenerated && !meeting.summary_failed, [meeting.summary_regenerated, meeting.summary_failed]);
+  const needsSummaryGeneration = useMemo(() => meeting.summary_failed === true, [meeting.summary_failed]);
+  const targetRegenerationMode = useMemo<SummaryMode>(() => {
+    const current = (meeting.summary_mode as SummaryMode) || 'detailed';
+    return current === 'short' ? 'detailed' : 'short';
+  }, [meeting.summary_mode]);
+  const hasTranscript = useMemo(() => Boolean((meeting.transcript || '').trim().length), [meeting.transcript]);
   const summaryRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const { showAlert, showConfirm } = useDialog();
+  const meetingSummaries = useMemo(() => inferSummaryValues(meeting), [meeting.summary_detailed, meeting.summary_short, meeting.summary, meeting.id]);
+  const displaySummaries = isEditing ? editedSummaries : meetingSummaries;
+  const currentSummaryText = displaySummaries[activeSummaryMode] || '';
+
+  useEffect(() => {
+    setEditedTitle(meeting.title);
+    setEditedSummaries(inferSummaryValues(meeting));
+    setEditedTranscript(meeting.display_transcript || meeting.transcript || '');
+    setEditedNotes(meeting.notes || '');
+  }, [
+    meeting.id,
+    meeting.title,
+    meeting.display_transcript,
+    meeting.transcript,
+    meeting.notes,
+    meeting.summary_detailed,
+    meeting.summary_short,
+    meeting.summary,
+  ]);
+
+  useEffect(() => {
+    setActiveSummaryMode((meeting.summary_mode as SummaryMode) || 'detailed');
+  }, [meeting.id, meeting.summary_mode]);
 
   useEffect(() => {
     loadSignature();
@@ -75,7 +123,7 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
       console.log('🗑️ MeetingDetail: Suppression du listener double-clic');
       document.removeEventListener('dblclick', handleDblClick);
     };
-  }, [editedSummary, editedTranscript, activeTab]);
+  }, [editedSummaries.detailed, editedSummaries.short, editedTranscript, activeTab]);
 
   const handleWordDoubleClick = (e: MouseEvent) => {
     console.log('🖱️ Double-clic traité dans handleWordDoubleClick');
@@ -159,16 +207,30 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
 
     let updatedText = '';
     if (activeTab === 'summary') {
+      const sourceSummaries = isEditing ? editedSummaries : meetingSummaries;
+      const baseText = sourceSummaries[activeSummaryMode] || '';
       updatedText = replaceAll
-        ? editedSummary.replace(new RegExp(`\\b${selectedWord}\\b`, 'gi'), newWord)
-        : editedSummary.replace(selectedWord, newWord);
+        ? baseText.replace(new RegExp(`\\b${selectedWord}\\b`, 'gi'), newWord)
+        : baseText.replace(selectedWord, newWord);
 
       console.log('📝 Mise à jour du résumé');
-      setEditedSummary(updatedText);
+      const updatedSummaries =
+        activeSummaryMode === 'detailed'
+          ? { detailed: updatedText, short: sourceSummaries.short }
+          : { detailed: sourceSummaries.detailed, short: updatedText };
+
+      if (isEditing) {
+        setEditedSummaries(updatedSummaries);
+      }
 
       await supabase
         .from('meetings')
-        .update({ summary: updatedText })
+        .update({
+          summary: activeSummaryMode === 'short' ? updatedSummaries.short : updatedSummaries.detailed,
+          summary_detailed: updatedSummaries.detailed,
+          summary_short: updatedSummaries.short,
+          summary_mode: activeSummaryMode,
+        })
         .eq('id', meeting.id);
 
       console.log('✅ Résumé sauvegardé dans la base de données');
@@ -193,6 +255,139 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
     setWordPosition(null);
 
     onUpdate();
+  };
+
+  const handleOpenRegeneration = () => {
+    setRegenerationMode(targetRegenerationMode);
+    setRegenerationError(null);
+    setShowRegenerationModal(true);
+  };
+
+  const handleCloseRegenerationModal = () => {
+    if (isRegeneratingSummary) return;
+    setShowRegenerationModal(false);
+    setRegenerationError(null);
+  };
+
+  const handleConfirmRegeneration = async () => {
+    if (!meeting.transcript || !meeting.transcript.trim()) {
+      setRegenerationError('La transcription complète est introuvable pour cette réunion.');
+      return;
+    }
+
+    try {
+      setIsRegeneratingSummary(true);
+      const [detailedResult, shortResult] = await Promise.all([
+        generateSummary(meeting.transcript, meeting.user_id, 0, 'detailed'),
+        generateSummary(meeting.transcript, meeting.user_id, 0, 'short'),
+      ]);
+      const detailedSummary = detailedResult.summary || '';
+      const shortSummary = shortResult.summary || '';
+      const finalTitle =
+        (regenerationMode === 'detailed' ? detailedResult.title : shortResult.title)?.trim() ||
+        detailedResult.title?.trim() ||
+        shortResult.title?.trim() ||
+        meeting.title;
+
+      const { error } = await supabase
+        .from('meetings')
+        .update({
+          title: finalTitle,
+          summary: regenerationMode === 'short' ? shortSummary : detailedSummary,
+          summary_detailed: detailedSummary,
+          summary_short: shortSummary,
+          summary_mode: regenerationMode,
+          summary_regenerated: true,
+        })
+        .eq('id', meeting.id);
+
+      if (error) {
+        throw error;
+      }
+
+      setEditedTitle(finalTitle);
+      setEditedSummaries({ detailed: detailedSummary, short: shortSummary });
+      setActiveSummaryMode(regenerationMode);
+      setShowRegenerationModal(false);
+      setRegenerationError(null);
+      onUpdate();
+    } catch (err: any) {
+      console.error('Erreur lors de la régénération:', err);
+      setRegenerationError(err?.message || 'Impossible de régénérer le résumé.');
+    } finally {
+      setIsRegeneratingSummary(false);
+    }
+  };
+
+  // Fonction pour générer le résumé pour les réunions où la génération avait échoué
+  const handleGenerateFailedSummary = async () => {
+    if (!meeting.transcript || !meeting.transcript.trim()) {
+      await showAlert({
+        title: 'Transcription introuvable',
+        message: 'La transcription complète est introuvable pour cette réunion.',
+        variant: 'danger',
+      });
+      return;
+    }
+
+    const summaryMode = (meeting.summary_mode as SummaryMode) || 'detailed';
+
+    try {
+      setIsGeneratingFailedSummary(true);
+
+      // Générer les deux versions du résumé
+      const [detailedResult, shortResult] = await Promise.all([
+        generateSummary(meeting.transcript, meeting.user_id, 0, 'detailed'),
+        generateSummary(meeting.transcript, meeting.user_id, 0, 'short'),
+      ]);
+
+      const detailedSummary = detailedResult.summary || '';
+      const shortSummary = shortResult.summary || '';
+      const finalTitle =
+        (summaryMode === 'detailed' ? detailedResult.title : shortResult.title)?.trim() ||
+        detailedResult.title?.trim() ||
+        shortResult.title?.trim() ||
+        meeting.title;
+
+      // Mettre à jour la réunion avec le résumé
+      const { error } = await supabase
+        .from('meetings')
+        .update({
+          title: finalTitle,
+          summary: summaryMode === 'short' ? shortSummary : detailedSummary,
+          summary_detailed: detailedSummary,
+          summary_short: shortSummary,
+          summary_mode: summaryMode,
+          summary_failed: false, // Réinitialiser le flag
+        })
+        .eq('id', meeting.id);
+
+      if (error) {
+        throw error;
+      }
+
+      // Mettre à jour l'UI
+      setEditedTitle(finalTitle);
+      setEditedSummaries({ detailed: detailedSummary, short: shortSummary });
+      setActiveSummaryMode(summaryMode);
+
+      await showAlert({
+        title: 'Résumé généré',
+        message: 'Le résumé a été généré avec succès.',
+        variant: 'success',
+      });
+
+      onUpdate();
+    } catch (err: any) {
+      console.error('Erreur lors de la génération du résumé:', err);
+      await showAlert({
+        title: 'Erreur',
+        message: err?.message || 'Impossible de générer le résumé. Veuillez réessayer.',
+        variant: 'danger',
+      });
+    } finally {
+      setIsGeneratingFailedSummary(false);
+    }
   };
 
   // Timer pour mettre à jour le temps restant
@@ -321,6 +516,8 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
       return `${minutes}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const summaryForEmail = isEditing ? editedSummaries[activeSummaryMode] : meetingSummaries[activeSummaryMode];
+
     return await generateEmailBody({
       title: meeting.title,
       date: formatDate(meeting.created_at),
@@ -329,7 +526,7 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
         ? `${meeting.participant_first_name} ${meeting.participant_last_name}`
         : undefined,
       participantEmail: meeting.participant_email || undefined,
-      summary: meeting.summary || '',
+      summary: summaryForEmail || '',
       attachments: emailAttachments,
       senderName,
       signatureText,
@@ -350,9 +547,35 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
   }) => {
     setIsSendingEmail(true);
 
-    console.log('🔍 [MeetingDetail] Email method actuel:', emailMethod);
+    // Utiliser la méthode sélectionnée dans le composeur (pas les settings)
+    const selectedMethod = emailData.method === 'app' ? 'local' : emailData.method;
+    console.log('🔍 [MeetingDetail] Méthode sélectionnée dans EmailComposer:', emailData.method, '→', selectedMethod);
 
     try {
+      // 🎯 NOUVELLE APPROCHE: Envoi individuel pour tracking précis
+      const { sendIndividualEmails } = await import('../services/individualEmailSender');
+
+      const result = await sendIndividualEmails(
+        emailData,
+        selectedMethod as 'smtp' | 'gmail' | 'local',
+        meeting?.id,
+        meeting.user_id
+      );
+
+      if (!result.success && result.failed.length > 0) {
+        throw new Error(`Échec d'envoi pour : ${result.failed.join(', ')}`);
+      }
+
+      // Afficher le modal de succès
+      const totalRecipients = emailData.recipients.length + emailData.ccRecipients.length + emailData.bccRecipients.length;
+      setSuccessModalData({ recipientCount: result.totalSent, method: selectedMethod });
+      setShowSuccessModal(true);
+      setShowEmailComposer(false);
+      
+      console.log(`✅ ${result.totalSent} emails envoyés individuellement pour tracking précis`);
+      return;
+      
+      /* CODE ANCIEN COMMENTÉ - À SUPPRIMER APRÈS TESTS
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       const trackingId = crypto.randomUUID();
@@ -374,7 +597,9 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
           ? emailData.htmlBody.replace('</body>', `${trackingPixels}</body>`)
           : `${emailData.htmlBody}\n${trackingPixels}`
         : emailData.htmlBody;
+      */
 
+      /* CODE ANCIEN - REMPLACÉ PAR sendIndividualEmails()
       if (emailMethod === 'smtp') {
         // Envoi via SMTP
         const { data: { session } } = await supabase.auth.getSession();
@@ -574,6 +799,7 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
         window.location.href = mailtoLink;
         setShowEmailComposer(false);
       }
+      FIN CODE ANCIEN COMMENTÉ */
     } catch (error: any) {
       console.error('Erreur lors de l\'envoi de l\'email:', error);
       
@@ -600,7 +826,11 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
         console.error('Erreur enregistrement historique:', historyError);
       }
       
-      alert(`❌ Erreur lors de l'envoi de l'email:\n${error.message}\n\n${emailMethod === 'smtp' ? 'Vérifiez votre configuration SMTP dans les Paramètres.' : ''}`);
+      await showAlert({
+        title: 'Erreur lors de l\'envoi',
+        message: `❌ Erreur lors de l'envoi de l'email:\n${error.message}\n\n${emailMethod === 'smtp' ? 'Vérifiez votre configuration SMTP dans les Paramètres.' : ''}`,
+        variant: 'danger',
+      });
     } finally {
       setIsSendingEmail(false);
     }
@@ -787,7 +1017,10 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
         .from('meetings')
         .update({
           title: editedTitle,
-          summary: editedSummary,
+          summary: editedSummaries[activeSummaryMode] || '',
+          summary_detailed: editedSummaries.detailed || '',
+          summary_short: editedSummaries.short || '',
+          summary_mode: activeSummaryMode,
           transcript: cleanTranscript, // Version propre pour le résumé
           display_transcript: editedTranscript, // Version avec séparateurs pour l'affichage
           notes: editedNotes,
@@ -799,16 +1032,20 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
       setIsEditing(false);
       onUpdate();
     } catch (error) {
-      
-      alert('Erreur lors de la sauvegarde des modifications');
+      await showAlert({
+        title: 'Erreur lors de la sauvegarde',
+        message: 'Erreur lors de la sauvegarde des modifications',
+        variant: 'danger',
+      });
     }
   };
 
   const handleCancelEdit = () => {
     setEditedTitle(meeting.title);
-    setEditedSummary(meeting.summary || '');
-    setEditedTranscript(meeting.transcript || '');
+    setEditedSummaries(inferSummaryValues(meeting));
+    setEditedTranscript(meeting.display_transcript || meeting.transcript || '');
     setEditedNotes(meeting.notes || '');
+    setActiveSummaryMode((meeting.summary_mode as SummaryMode) || 'detailed');
     setIsEditing(false);
   };
 
@@ -817,27 +1054,39 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
     try {
       await generatePDFFromHTML(
         meeting.title,
-        meeting.summary || ''
+        currentSummaryText || ''
       );
     } catch (error) {
       console.error('Erreur lors de la génération du PDF:', error);
-      alert('Erreur lors de la génération du PDF. Veuillez réessayer.');
+      await showAlert({
+        title: 'Erreur PDF',
+        message: 'Erreur lors de la génération du PDF. Veuillez réessayer.',
+        variant: 'danger',
+      });
     }
   };
 
   const handleDownloadAudio = async () => {
     if (!meeting.audio_url) {
-      alert('Aucun fichier audio disponible pour cette réunion.');
+      await showAlert({
+        title: 'Audio indisponible',
+        message: 'Aucun fichier audio disponible pour cette réunion.',
+        variant: 'warning',
+      });
       return;
     }
 
     // Avertissement sur la durée de disponibilité (24h)
-    const shouldDownload = confirm(
-      '⚠️ IMPORTANT : Disponibilité limitée\n\n' +
-      'L\'audio sera automatiquement supprimé 24 heures après sa création.\n\n' +
-      'Téléchargez-le maintenant si vous souhaitez le conserver.\n\n' +
-      'Voulez-vous continuer le téléchargement ?'
-    );
+    const shouldDownload = await showConfirm({
+      title: 'Télécharger l\'audio ?',
+      message:
+        '⚠️ IMPORTANT : Disponibilité limitée\n\n' +
+        'L\'audio sera automatiquement supprimé 24 heures après sa création.\n\n' +
+        'Téléchargez-le maintenant si vous souhaitez le conserver.\n\n' +
+        'Voulez-vous continuer le téléchargement ?',
+      confirmLabel: 'Télécharger',
+      variant: 'warning',
+    });
 
     if (!shouldDownload) {
       return;
@@ -870,12 +1119,20 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
     } catch (error: any) {
       console.error('Erreur lors du téléchargement de l\'audio:', error);
       if (error.message?.includes('404') || error.message?.includes('not found')) {
-        alert('L\'audio n\'est pas encore disponible. Veuillez patienter quelques instants et réessayer.');
+        await showAlert({
+          title: 'Audio en cours de préparation',
+          message: 'L\'audio n\'est pas encore disponible. Veuillez patienter quelques instants et réessayer.',
+          variant: 'info',
+        });
         setAudioAvailable(false);
         // Revérifier après quelques secondes
         setTimeout(() => checkAudioAvailability(), 3000);
       } else {
-        alert('Erreur lors du téléchargement de l\'audio. Veuillez réessayer.');
+        await showAlert({
+          title: 'Erreur de téléchargement',
+          message: 'Erreur lors du téléchargement de l\'audio. Veuillez réessayer.',
+          variant: 'danger',
+        });
       }
     } finally {
       setIsDownloadingAudio(false);
@@ -939,11 +1196,16 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
 
           <div className="flex-1">
             <label className="block text-sm font-bold text-cocoa-800 mb-2">
-              Résumé IA
+              Résumé IA · {activeSummaryMode === 'short' ? 'Version courte' : 'Version détaillée'}
             </label>
             <textarea
-              value={editedSummary}
-              onChange={(e) => setEditedSummary(e.target.value)}
+              value={editedSummaries[activeSummaryMode] || ''}
+              onChange={(e) =>
+                setEditedSummaries((prev) => ({
+                  ...prev,
+                  [activeSummaryMode]: e.target.value,
+                }))
+              }
               placeholder="Le résumé généré par l'IA apparaîtra ici..."
               className="w-full min-h-[500px] p-6 border-2 border-orange-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-coral-500 focus:border-coral-500 text-cocoa-800 text-lg leading-relaxed resize-y"
             />
@@ -1082,46 +1344,82 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
             </div>
           </div>
 
-          <div className="flex items-center gap-2 px-4 md:px-8 border-t-2 border-orange-100 bg-gradient-to-r from-orange-50/50 to-red-50/50 overflow-x-auto flex-shrink-0">
-            <button
-              onClick={() => setActiveTab('summary')}
-              className={`px-4 md:px-8 py-3 md:py-4 text-sm md:text-base font-bold transition-all relative rounded-t-xl whitespace-nowrap ${
-                activeTab === 'summary'
-                  ? 'text-coral-600 bg-white'
-                  : 'text-cocoa-600 hover:text-coral-500 hover:bg-orange-50/50'
-              }`}
-            >
-              Résumé
-              {activeTab === 'summary' && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-coral-500 to-sunset-500 rounded-full"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('transcript')}
-              className={`px-4 md:px-8 py-3 md:py-4 text-sm md:text-base font-bold transition-all relative rounded-t-xl whitespace-nowrap ${
-                activeTab === 'transcript'
-                  ? 'text-coral-600 bg-white'
-                  : 'text-cocoa-600 hover:text-coral-500 hover:bg-orange-50/50'
-              }`}
-            >
-              Transcription
-              {activeTab === 'transcript' && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-coral-500 to-sunset-500 rounded-full"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('suggestions')}
-              className={`px-4 md:px-8 py-3 md:py-4 text-sm md:text-base font-bold transition-all relative rounded-t-xl whitespace-nowrap ${
-                activeTab === 'suggestions'
-                  ? 'text-coral-600 bg-white'
-                  : 'text-cocoa-600 hover:text-coral-500 hover:bg-orange-50/50'
-              }`}
-            >
-              Suggestions
-              {activeTab === 'suggestions' && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-coral-500 to-sunset-500 rounded-full"></div>
-              )}
-            </button>
+          <div className="flex flex-wrap items-center gap-3 px-4 md:px-8 border-t-2 border-orange-100 bg-gradient-to-r from-orange-50/50 to-red-50/50 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setActiveTab('summary')}
+                className={`px-4 md:px-8 py-3 md:py-4 text-sm md:text-base font-bold transition-all relative rounded-t-xl whitespace-nowrap ${
+                  activeTab === 'summary'
+                    ? 'text-coral-600 bg-white'
+                    : 'text-cocoa-600 hover:text-coral-500 hover:bg-orange-50/50'
+                }`}
+              >
+                Résumé
+                {activeTab === 'summary' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-coral-500 to-orange-500 rounded-full" />
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('transcript')}
+                className={`px-4 md:px-8 py-3 md:py-4 text-sm md:text-base font-bold transition-all relative rounded-t-xl whitespace-nowrap ${
+                  activeTab === 'transcript'
+                    ? 'text-amber-600 bg-white'
+                    : 'text-cocoa-600 hover:text-amber-500 hover:bg-orange-50/50'
+                }`}
+              >
+                Transcription
+                {activeTab === 'transcript' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 to-red-500 rounded-full" />
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('suggestions')}
+                className={`px-4 md:px-8 py-3 md:py-4 text-sm md:text-base font-bold transition-all relative rounded-t-xl whitespace-nowrap ${
+                  activeTab === 'suggestions'
+                    ? 'text-purple-600 bg-white'
+                    : 'text-cocoa-600 hover:text-purple-500 hover:bg-purple-50/50'
+                }`}
+              >
+                Suggestions
+                {activeTab === 'suggestions' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full" />
+                )}
+              </button>
+            </div>
+
+            {/* Bouton pour générer le résumé si la génération avait échoué */}
+            {needsSummaryGeneration && (
+              <button
+                onClick={handleGenerateFailedSummary}
+                disabled={isGeneratingFailedSummary}
+                className="ml-auto inline-flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 text-sm md:text-base font-semibold text-amber-600 border-2 border-amber-200 rounded-2xl bg-white hover:bg-amber-50 hover:text-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGeneratingFailedSummary ? (
+                  <>
+                    <RotateCw className="w-4 h-4 animate-spin" />
+                    Génération en cours...
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-4 h-4" />
+                    Générer le résumé
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Bouton pour régénérer dans un autre mode (si pas d'échec et pas déjà régénéré) */}
+            {canRegenerateSummary && !needsSummaryGeneration && (
+              <button
+                onClick={handleOpenRegeneration}
+                className="ml-auto inline-flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 text-sm md:text-base font-semibold text-purple-600 border-2 border-purple-200 rounded-2xl bg-white hover:bg-purple-50 hover:text-purple-700 transition-colors"
+              >
+                <Sparkles className="w-4 h-4" />
+                {targetRegenerationMode === 'detailed' ? 'Regénérer en détaillé' : 'Regénérer en court'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1161,6 +1459,39 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
 
           {activeTab === 'summary' ? (
             <div>
+              {/* Avertissement si la génération de résumé avait échoué */}
+              {needsSummaryGeneration && (
+                <div className="mb-8 bg-gradient-to-br from-amber-50 to-orange-100 rounded-2xl p-6 border-2 border-amber-300">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-lg font-bold text-amber-800 mb-2">Résumé non généré</h4>
+                      <p className="text-amber-700 mb-4">
+                        La génération du résumé a échoué lors de l'enregistrement, mais votre transcription a été sauvegardée.
+                        Cliquez sur le bouton "Générer le résumé" ci-dessus pour créer le résumé maintenant.
+                      </p>
+                      <button
+                        onClick={handleGenerateFailedSummary}
+                        disabled={isGeneratingFailedSummary}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors font-semibold disabled:opacity-50"
+                      >
+                        {isGeneratingFailedSummary ? (
+                          <>
+                            <RotateCw className="w-4 h-4 animate-spin" />
+                            Génération en cours...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            Générer le résumé maintenant
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {meeting.notes && (
                 <div className="mb-8 bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-6 border-2 border-amber-200">
                   <div className="flex items-center gap-2 mb-3">
@@ -1172,9 +1503,31 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
                   </p>
                 </div>
               )}
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <button
+                  onClick={() => setActiveSummaryMode('detailed')}
+                  className={`px-4 py-2 rounded-full border text-sm font-semibold transition-all ${
+                    activeSummaryMode === 'detailed'
+                      ? 'bg-coral-100 text-coral-700 border-coral-300 shadow-sm'
+                      : 'text-cocoa-500 border-cocoa-200 hover:border-coral-200 hover:text-coral-600'
+                  }`}
+                >
+                  Résumé détaillé
+                </button>
+                <button
+                  onClick={() => setActiveSummaryMode('short')}
+                  className={`px-4 py-2 rounded-full border text-sm font-semibold transition-all ${
+                    activeSummaryMode === 'short'
+                      ? 'bg-orange-100 text-orange-700 border-orange-300 shadow-sm'
+                      : 'text-cocoa-500 border-cocoa-200 hover:border-orange-200 hover:text-orange-600'
+                  }`}
+                >
+                  Résumé court
+                </button>
+              </div>
               <div className="prose prose-slate max-w-none">
                 <div ref={summaryRef} className="text-cocoa-800 whitespace-pre-wrap leading-relaxed text-lg cursor-text">
-                  {renderSummaryWithBold(meeting.summary)}
+                  {renderSummaryWithBold(currentSummaryText)}
                 </div>
               </div>
             </div>
@@ -1322,6 +1675,16 @@ export const MeetingDetail = ({ meeting, onBack, onUpdate }: MeetingDetailProps)
         word={selectedWord}
         onReplace={handleWordReplace}
         userId={meeting.user_id}
+      />
+
+      <SummaryRegenerationModal
+        isOpen={showRegenerationModal}
+        meetingTitle={meeting.title}
+        targetMode={regenerationMode}
+        isProcessing={isRegeneratingSummary}
+        errorMessage={regenerationError}
+        onConfirm={handleConfirmRegeneration}
+        onCancel={handleCloseRegenerationModal}
       />
 
     </>

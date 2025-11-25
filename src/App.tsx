@@ -31,13 +31,16 @@ import { MobileVisioTipModal } from './components/MobileVisioTipModal';
 import { LongRecordingReminderModal } from './components/LongRecordingReminderModal';
 import { RecordingLimitModal } from './components/RecordingLimitModal';
 import { ShortRecordingWarningModal } from './components/ShortRecordingWarningModal';
+import { SummaryPreferenceModal } from './components/SummaryPreferenceModal';
+import { UpdatePasswordModal } from './components/UpdatePasswordModal';
 import { ContactSupport } from './components/ContactSupport';
 import { SubscriptionSelection } from './components/SubscriptionSelection';
 import { supabase, Meeting } from './lib/supabase';
 import { useBackgroundProcessing } from './hooks/useBackgroundProcessing';
-import { transcribeAudio, generateSummary } from './services/transcription';
+import { transcribeAudio, generateSummary, SummaryMode } from './services/transcription';
 import { ensureWhisperCompatible } from './services/audioEncoding';
 import { generateEmailBody } from './services/emailTemplates';
+import { useDialog } from './context/DialogContext';
 
 // Fonction pour nettoyer la transcription et supprimer les répétitions
 const cleanTranscript = (transcript: string): string => {
@@ -93,6 +96,21 @@ function App() {
       return 'gmail-callback' as const;
     }
 
+    // Si le path est /auth (redirection Supabase après confirmation email), rediriger vers record
+    if (path === '/auth' || path.startsWith('/auth/')) {
+      console.log('🔐 Redirection depuis /auth vers record');
+      // Nettoyer l'URL et rediriger vers record
+      window.history.replaceState({}, '', '/#record');
+      return 'record' as const;
+    }
+
+    // Si le hash est 'auth' (redirection Supabase), rediriger vers record
+    if (hash === 'auth') {
+      console.log('🔐 Redirection depuis #auth vers record');
+      window.history.replaceState({}, '', '/#record');
+      return 'record' as const;
+    }
+
     // Si un hash valide existe, l'utiliser
     if (hash && ['record', 'history', 'detail', 'settings', 'upload', 'dashboard', 'contact', 'subscription'].includes(hash)) {
       return hash as any;
@@ -106,7 +124,16 @@ function App() {
   const [historyTab, setHistoryTab] = useState<'meetings' | 'emails'>('meetings'); // Onglet d'historique
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
-  const [result, setResult] = useState<{ title: string; transcript: string; summary: string; audioUrl?: string | null; meetingId?: string } | null>(null);
+  const [result, setResult] = useState<{
+    title: string;
+    transcript: string;
+    summaryDetailed: string;
+    summaryShort: string;
+    summaryMode: SummaryMode;
+    audioUrl?: string | null;
+    meetingId?: string;
+    summaryFailed?: boolean;
+  } | null>(null);
   const [partialTranscripts, setPartialTranscripts] = useState<string[]>([]);
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -117,6 +144,7 @@ function App() {
   const [emailBody, setEmailBody] = useState<string>('');
   const [showEmailSuccessModal, setShowEmailSuccessModal] = useState(false);
   const [emailSuccessData, setEmailSuccessData] = useState<{ recipientCount: number; method: 'gmail' | 'smtp' }>({ recipientCount: 0, method: 'smtp' });
+  const { showAlert, showConfirm } = useDialog();
   const [user, setUser] = useState<any>(null);
   // Pas de loading si on est sur le callback Gmail
   const [isAuthLoading, setIsAuthLoading] = useState(window.location.pathname !== '/gmail-callback');
@@ -128,6 +156,7 @@ function App() {
   const [isMeetingsLoading, setIsMeetingsLoading] = useState(false);
   const [meetingsError, setMeetingsError] = useState<string | null>(null);
   const [meetingsLoaded, setMeetingsLoaded] = useState(false); // Cache flag
+  const [isMeetingsRefreshing, setIsMeetingsRefreshing] = useState(false);
   const [recordingNotes, setRecordingNotes] = useState('');
   const [meetingTitle, setMeetingTitle] = useState('');
   const lastProcessedSizeRef = useRef<number>(0);
@@ -147,9 +176,18 @@ function App() {
   const [showRecordingLimitModal, setShowRecordingLimitModal] = useState(false);
   const [showShortRecordingModal, setShowShortRecordingModal] = useState(false);
   const [shortRecordingSeconds, setShortRecordingSeconds] = useState(0);
+  const [summaryPreference, setSummaryPreference] = useState<SummaryMode | null>(null);
+  const [showSummaryPreferenceModal, setShowSummaryPreferenceModal] = useState(false);
+  const [recommendedSummaryMode, setRecommendedSummaryMode] = useState<SummaryMode>('detailed');
+  const [summaryWordEstimate, setSummaryWordEstimate] = useState(0);
+  const [defaultSummaryModeSetting, setDefaultSummaryModeSetting] = useState<SummaryMode | null>(null);
+  const [isDefaultSummaryModeLoaded, setIsDefaultSummaryModeLoaded] = useState(false);
+  const [showDefaultModeReminder, setShowDefaultModeReminder] = useState(false);
+  const [showUpdatePasswordModal, setShowUpdatePasswordModal] = useState(false);
   const [recordingReminderToast, setRecordingReminderToast] = useState<{ message: string } | null>(null);
   const categoryColorSupportedRef = useRef<boolean | null>(null);
   const [subscription, setSubscription] = useState<{ plan_type: 'starter' | 'unlimited'; is_active: boolean } | null>(null);
+  const [isSubscriptionLoading, setIsSubscriptionLoading] = useState(true);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [subscriptionUpgradeOnly, setSubscriptionUpgradeOnly] = useState(false);
 
@@ -268,6 +306,120 @@ function App() {
   const TWO_HOURS_IN_SECONDS = 1 * 60 * 60; // 2 heures
   const FOUR_HOURS_IN_SECONDS = 2 * 60 * 60; // 4 heures
   const MIN_RECORDING_SECONDS = 60;
+  const loadMeetingsRequestRef = useRef(0);
+  const isHistoryInitialLoading = !meetingsLoaded && isMeetingsLoading;
+  const isHistoryRefreshing = meetingsLoaded && isMeetingsRefreshing;
+  const isRecentLoading = !meetingsLoaded && isMeetingsLoading;
+  const isRecentRefreshing = meetingsLoaded && (isMeetingsRefreshing || isMeetingsLoading);
+
+  const determineSummaryRecommendation = useCallback((): { recommendation: SummaryMode; wordEstimate: number } => {
+    const transcriptText = (liveTranscriptRef.current || '').trim();
+    const wordEstimate = transcriptText ? transcriptText.split(/\s+/).filter(Boolean).length : 0;
+
+    if (recordingTime < 5 * 60) {
+      return { recommendation: 'short', wordEstimate };
+    }
+
+    if (wordEstimate > 0 && wordEstimate < 600) {
+      return { recommendation: 'short', wordEstimate };
+    }
+
+    return { recommendation: 'detailed', wordEstimate };
+  }, [recordingTime]);
+
+  const startPartialAnalysisTimer = useCallback(() => {
+    if (partialAnalysisTimerRef.current) {
+      return;
+    }
+
+    partialAnalysisTimerRef.current = window.setInterval(async () => {
+      try {
+        const wav = await getLast15sWav();
+        if (!wav || wav.size < 5000) return;
+        console.log(`📝 Transcription fenêtre 15s ${(wav.size / 1024).toFixed(0)} KB`);
+        const text = await transcribeAudio(wav, 0, `window15s_${Date.now()}.wav`);
+        if (text && text.trim().length > 5) {
+          setPartialTranscripts(prev => {
+            const normalizedText = text.trim().toLowerCase();
+            const isDuplicate = prev.some(existing =>
+              existing.trim().toLowerCase() === normalizedText ||
+              existing.trim().toLowerCase().includes(normalizedText) ||
+              normalizedText.includes(existing.trim().toLowerCase())
+            );
+
+            if (isDuplicate) {
+              return prev;
+            }
+
+            return [...prev, text];
+          });
+
+          liveTranscriptRef.current = `${(liveTranscriptRef.current || '').trim()} ${text}`.trim();
+          recentChunksRef.current.push(text);
+          if (recentChunksRef.current.length > 2) recentChunksRef.current.shift();
+          const twoChunkWindow = recentChunksRef.current.join(' ').trim();
+          await analyzePartialTranscript(twoChunkWindow);
+        }
+      } catch (e) {
+        console.error('❌ Erreur transcription 15s:', e);
+      }
+    }, 15000);
+  }, [getLast15sWav, analyzePartialTranscript]);
+
+  const loadDefaultSummaryMode = useCallback(async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('default_summary_mode')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      const mode = (data?.default_summary_mode as SummaryMode | null) || null;
+      setDefaultSummaryModeSetting(mode);
+      setIsDefaultSummaryModeLoaded(true);
+      if (mode) {
+        setShowDefaultModeReminder(false);
+      }
+    } catch (error) {
+      console.error('Erreur chargement mode résumé par défaut:', error);
+      setDefaultSummaryModeSetting(null);
+      setIsDefaultSummaryModeLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user?.id) {
+      loadDefaultSummaryMode(user.id);
+    } else {
+      setDefaultSummaryModeSetting(null);
+      setIsDefaultSummaryModeLoaded(false);
+    }
+  }, [user?.id, loadDefaultSummaryMode]);
+
+  useEffect(() => {
+    if (isPaused) {
+      if (partialAnalysisTimerRef.current) {
+        console.log('⏸️ Pause: arrêt du timer d\'analyse partielle');
+        clearInterval(partialAnalysisTimerRef.current);
+        partialAnalysisTimerRef.current = null;
+      }
+    } else if (isRecording && !partialAnalysisTimerRef.current) {
+      console.log('▶️ Reprise: relance du timer d\'analyse partielle');
+      startPartialAnalysisTimer();
+    }
+  }, [isPaused, isRecording, startPartialAnalysisTimer]);
+
+  const promptSummaryPreference = useCallback(() => {
+    const { recommendation, wordEstimate } = determineSummaryRecommendation();
+    setRecommendedSummaryMode(recommendation);
+    setSummaryWordEstimate(wordEstimate);
+    setShowDefaultModeReminder(!defaultSummaryModeSetting);
+    setShowSummaryPreferenceModal(true);
+  }, [determineSummaryRecommendation, defaultSummaryModeSetting]);
 
 
   useEffect(() => {
@@ -280,24 +432,67 @@ function App() {
     checkUser();
 
     // Restaurer la vue depuis l'URL (hash) au chargement
-    const hash = window.location.hash.replace('#', '');
-    if (hash && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hash)) {
-      console.log('🔄 Restauration de la vue depuis l\'URL:', hash);
-      setView(hash as any);
-    } else if (hash === 'detail') {
-      // Si on est sur detail sans réunion, rediriger vers history
-      console.log('⚠️ Vue detail sans réunion, redirection vers history');
-      setView('history');
-      window.history.replaceState({ view: 'history' }, '', '#history');
-    } else if (hash && hash !== '') {
-      // Hash invalide, rediriger vers record
-      console.log('⚠️ Hash invalide:', hash, 'redirection vers record');
-      setView('record');
-      window.history.replaceState({ view: 'record' }, '', '#record');
+    let hash = window.location.hash.replace('#', '');
+
+    // IMPORTANT: Si le hash contient type=recovery, NE PAS LE MODIFIER
+    // Supabase a besoin des tokens pour déclencher l'événement PASSWORD_RECOVERY
+    if (hash.includes('type=recovery')) {
+      console.log('🔐 Hash contient type=recovery, ne pas modifier l\'URL');
+      // Ne rien faire, laisser Supabase gérer les tokens
+      // L'événement PASSWORD_RECOVERY sera déclenché par onAuthStateChange
+    } else {
+      // Extraire juste la vue (avant # ou ? ou &)
+      const hashView = hash.split(/[#?&]/)[0];
+
+      if (hashView && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hashView)) {
+        console.log('🔄 Restauration de la vue depuis l\'URL:', hashView);
+        setView(hashView as any);
+      } else if (hashView === 'detail') {
+        // Si on est sur detail sans réunion, rediriger vers history
+        console.log('⚠️ Vue detail sans réunion, redirection vers history');
+        setView('history');
+        window.history.replaceState({ view: 'history' }, '', '#history');
+      } else if (hash && hash !== '') {
+        // Hash invalide, rediriger vers record
+        console.log('⚠️ Hash invalide:', hash, 'redirection vers record');
+        setView('record');
+        window.history.replaceState({ view: 'record' }, '', '#record');
+      }
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    // Vérifier la session initiale
+    const checkInitialSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        console.log('🔍 Session initiale:', !!session?.user);
+        setUser(session?.user ?? null);
+        
+        if (session?.user) {
+          loadMeetings();
+        }
+      } catch (error) {
+        console.error('❌ Erreur lors de la vérification de la session:', error);
+      } finally {
+        setIsAuthLoading(false);
+      }
+    };
+
+    checkInitialSession();
+
+    const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('🔐 Auth state change:', event, 'User:', !!session?.user);
       setUser(session?.user ?? null);
+
+      // Arrêter le chargement si ce n'est pas déjà fait
+      setIsAuthLoading(false);
+
+      // Gérer l'événement PASSWORD_RECOVERY (reset password)
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log('🔐 PASSWORD_RECOVERY event detected - showing password update modal');
+        setShowUpdatePasswordModal(true);
+        return;
+      }
+
       // Ne changer la vue que lors de la connexion initiale, pas à chaque changement d'état
       if (session?.user && event === 'SIGNED_IN') {
         // Si on a déjà une vue depuis l'URL, ne pas la changer
@@ -307,24 +502,32 @@ function App() {
           window.history.replaceState({ view: 'record' }, '', '#record');
         }
         loadMeetings();
+        checkSubscription(session.user.id);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => authSubscription.unsubscribe();
   }, []);
 
-  // Charger les réunions quand l'utilisateur change
+  // Charger les réunions et vérifier l'abonnement quand l'utilisateur change
   useEffect(() => {
     if (user) {
       loadMeetings();
+      checkSubscription(user.id);
+    } else {
+      // Réinitialiser l'état d'abonnement quand l'utilisateur se déconnecte
+      setSubscription(null);
+      setIsSubscriptionLoading(false);
     }
   }, [user]);
 
   // Recharger les réunions quand on navigue vers certaines vues
   useEffect(() => {
     if (user && (view === 'record' || view === 'history' || view === 'dashboard')) {
-      console.log('🔄 Vue changée vers', view, '- rechargement des réunions si nécessaire');
-      loadMeetings(); // Ceci ne fera rien si déjà chargé (sauf si forceReload=true)
+      console.log('🔄 Vue changée vers', view, '- rechargement des réunions');
+      // Forcer le rechargement pour la vue history afin de garantir la synchronisation avec la sidebar
+      const forceReload = view === 'history';
+      loadMeetings(forceReload);
     }
     // Forcer le rechargement de la config email quand on navigue vers Contact
     if (view === 'contact') {
@@ -340,11 +543,21 @@ function App() {
       // Ignorer si pas d'état ou si on est déjà sur la bonne vue
       if (!state || !state.view) {
         // Essayer de lire depuis le hash si pas d'état
-        const hash = window.location.hash.replace('#', '');
-        if (hash && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hash)) {
-          console.log('🔄 Restauration depuis hash:', hash);
-          setView(hash as any);
-        } else if (hash === 'detail') {
+        let hash = window.location.hash.replace('#', '');
+
+        // IMPORTANT: Si le hash contient type=recovery, ne rien faire
+        if (hash.includes('type=recovery')) {
+          console.log('🔐 Hash contient type=recovery, ne pas modifier');
+          return;
+        }
+
+        // Extraire juste la vue (avant # ou ? ou &)
+        const hashView = hash.split(/[#?&]/)[0];
+
+        if (hashView && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hashView)) {
+          console.log('🔄 Restauration depuis hash:', hashView);
+          setView(hashView as any);
+        } else if (hashView === 'detail') {
           // Rediriger vers history si on est sur detail sans réunion
           console.log('⚠️ Vue detail sans réunion, redirection vers history');
           setView('history');
@@ -368,16 +581,37 @@ function App() {
     };
 
     const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '');
-      if (hash && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hash)) {
-        console.log('🔄 Hash changé:', hash);
-        setView(hash as any);
-      } else if (hash === 'detail') {
+      const path = window.location.pathname;
+      let hash = window.location.hash.replace('#', '');
+
+      // IMPORTANT: Si le hash contient type=recovery, ne rien faire
+      if (hash.includes('type=recovery')) {
+        console.log('🔐 Hash contient type=recovery, ne pas modifier');
+        return;
+      }
+
+      // Gérer la redirection depuis /auth
+      if (path === '/auth' || path.startsWith('/auth/')) {
+        console.log('🔐 Redirection depuis /auth détectée');
+        window.history.replaceState({}, '', '/#record');
+        setView('record');
+        return;
+      }
+
+      // Extraire juste la vue (avant # ou ? ou &)
+      const hashView = hash.split(/[#?&]/)[0];
+
+      if (hashView && ['record', 'history', 'upload', 'settings', 'dashboard', 'contact', 'subscription'].includes(hashView)) {
+        console.log('🔄 Hash changé:', hashView, '(hash complet:', hash, ')');
+        setView(hashView as any);
+      } else if (hashView === 'detail') {
         // Ne rien faire - laisser le useEffect gérer la redirection si nécessaire
         console.log('🔄 Hash detail détecté, conservation de la vue actuelle');
       } else if (hash && hash !== '') {
         // Hash invalide
-        console.log('⚠️ Hash invalide:', hash);
+        console.log('⚠️ Hash invalide:', hash, 'redirection vers record');
+        setView('record');
+        window.history.replaceState({ view: 'record' }, '', '#record');
       }
     };
 
@@ -461,10 +695,48 @@ function App() {
         return;
       }
       
-      console.log('🎬 Appel de processRecording depuis useEffect');
-      processRecording();
+      if (!summaryPreference) {
+        console.log('🔍 Pas de préférence de résumé définie', {
+          isDefaultSummaryModeLoaded,
+          defaultSummaryModeSetting,
+          showSummaryPreferenceModal
+        });
+        
+        if (isDefaultSummaryModeLoaded) {
+          if (defaultSummaryModeSetting) {
+            console.log('✅ Utilisation du mode par défaut:', defaultSummaryModeSetting);
+            setSummaryPreference(defaultSummaryModeSetting);
+          } else if (!showSummaryPreferenceModal) {
+            console.log('📋 Affichage du modal de choix (pas de mode par défaut)');
+            setShowDefaultModeReminder(true);
+            promptSummaryPreference();
+          }
+        } else {
+          console.log('⏳ Attente du chargement du mode de résumé par défaut');
+        }
+        return;
+      }
+
+      if (isProcessing) {
+        console.log('⏳ Traitement déjà en cours, attente...');
+        return;
+      }
+      
+      console.log('🎬 Appel de processRecording depuis useEffect avec mode:', summaryPreference);
+      processRecording(summaryPreference);
     }
-  }, [audioBlob, isRecording, recordingTime, resetRecording]);
+  }, [
+    audioBlob,
+    isRecording,
+    recordingTime,
+    resetRecording,
+    summaryPreference,
+    defaultSummaryModeSetting,
+    isDefaultSummaryModeLoaded,
+    showSummaryPreferenceModal,
+    promptSummaryPreference,
+    isProcessing,
+  ]);
 
   // Debug: tracker les états des modaux
   useEffect(() => {
@@ -555,6 +827,9 @@ function App() {
   useEffect(() => {
     
     if (isRecording) {
+      setSummaryPreference(null);
+      setShowSummaryPreferenceModal(false);
+      setSummaryWordEstimate(0);
       
       // Arrêter l'état de chargement
       setIsStartingRecording(false);
@@ -597,6 +872,7 @@ function App() {
   };
 
   const checkSubscription = async (userId: string) => {
+    setIsSubscriptionLoading(true);
     try {
       const { data, error } = await supabase
         .from('user_subscriptions')
@@ -615,6 +891,8 @@ function App() {
       }
     } catch (error) {
       console.error('Error checking subscription:', error);
+    } finally {
+      setIsSubscriptionLoading(false);
     }
   };
 
@@ -634,13 +912,17 @@ function App() {
       return;
     }
 
-    // Si déjà chargé et pas de force reload, skip
+    const requestId = ++loadMeetingsRequestRef.current;
     if (meetingsLoaded && !forceReload) {
       console.log('📋 Réunions déjà en cache, skip reload');
       return;
     }
 
+    if (!meetingsLoaded) {
     setIsMeetingsLoading(true);
+    } else {
+      setIsMeetingsRefreshing(true);
+    }
     setMeetingsError(null);
     
     try {
@@ -652,15 +934,14 @@ function App() {
         title,
         created_at,
         duration,
-        audio_url,
         summary,
+        summary_short,
+        summary_detailed,
         participant_first_name,
         participant_last_name,
         participant_email,
-        notes,
-        attachment_url,
-        attachment_name,
-        email_attachments,
+        summary_mode,
+        summary_regenerated,
         category_id,
         meeting_categories ( id, name, created_at, color )
       `;
@@ -671,15 +952,14 @@ function App() {
         title,
         created_at,
         duration,
-        audio_url,
         summary,
+        summary_short,
+        summary_detailed,
         participant_first_name,
         participant_last_name,
         participant_email,
-        notes,
-        attachment_url,
-        attachment_name,
-        email_attachments,
+        summary_mode,
+        summary_regenerated,
         category_id,
         meeting_categories ( id, name, created_at )
       `;
@@ -731,6 +1011,8 @@ function App() {
           transcript: null,
           display_transcript: null,
           suggestions: [],
+          summary_mode: (rest.summary_mode as SummaryMode) || 'detailed',
+          summary_regenerated: !!rest.summary_regenerated,
           category: meeting_categories
             ? {
                 id: meeting_categories.id,
@@ -742,19 +1024,26 @@ function App() {
         } as Meeting;
       });
 
+      if (loadMeetingsRequestRef.current === requestId) {
       setMeetings(normalizedMeetings);
       setMeetingsLoaded(true);
+      } else {
+        console.log('⏭️ Réponse loadMeetings ignorée (stale)');
+      }
       
     } catch (e) {
       console.error('❌ Exception chargement réunions:', e);
       setMeetingsError('Erreur lors du chargement des réunions: ' + (e as Error).message);
       setMeetingsLoaded(false);
     } finally {
+      if (loadMeetingsRequestRef.current === requestId) {
       setIsMeetingsLoading(false);
+        setIsMeetingsRefreshing(false);
+      }
     }
   };
 
-  const processRecording = async () => {
+  const processRecording = async (summaryMode: SummaryMode) => {
     if (!audioBlob || !user) {
       console.log('⚠️ processRecording: pas d\'audio ou pas d\'utilisateur', { 
         hasAudioBlob: !!audioBlob, 
@@ -801,27 +1090,25 @@ function App() {
         displayTranscript = finalTranscript; // Même version pour l'affichage
       }
 
-      // 2) Générer le résumé
-      setProcessingStatus('Génération du résumé IA...');
-
-      const result = await generateSummary(finalTranscript, userId);
-      console.log('✅ Résumé généré:', { title: result.title, summaryLength: result.summary?.length });
-      
-      const { title, summary } = result;
-      const provisionalTitle = meetingTitle || `Réunion du ${new Date().toLocaleDateString('fr-FR')}`;
-      const finalTitle = meetingTitle || title || provisionalTitle;
-
-      // 3) Créer la réunion UNIQUEMENT si transcription + résumé ont réussi
+      // 2) PRIORITÉ: Créer la réunion avec la transcription D'ABORD (avant le résumé)
+      // Cela garantit qu'on ne perd jamais la transcription même si le résumé échoue
       setProcessingStatus('Enregistrement de la réunion...');
-      console.log('💾 Création de la réunion avec toutes les données (quota sera débité maintenant)');
-      
+
+      const provisionalTitle = meetingTitle || `Réunion du ${new Date().toLocaleDateString('fr-FR')}`;
+
+      console.log('💾 Création de la réunion avec transcription EN PREMIER (protection contre perte de données)');
+
       const { data: created, error: createErr } = await supabase
         .from('meetings')
         .insert({
-          title: finalTitle,
+          title: provisionalTitle,
           transcript: finalTranscript, // Version propre pour le résumé
           display_transcript: displayTranscript, // Version avec séparateurs pour l'affichage
-          summary,
+          summary: null, // Pas encore de résumé
+          summary_short: null,
+          summary_detailed: null,
+          summary_mode: summaryMode,
+          summary_regenerated: false,
           duration: recordingTime,
           user_id: user.id,
           notes: recordingNotes || null,
@@ -830,13 +1117,71 @@ function App() {
         })
         .select()
         .maybeSingle();
-      
+
       if (createErr) {
         console.error('❌ Erreur création réunion:', createErr);
         throw createErr;
       }
-      
-      console.log('✅ Réunion créée avec succès, ID:', created?.id, '(quota débité)');
+
+      console.log('✅ Réunion créée avec transcription, ID:', created?.id);
+
+      // 3) Maintenant, tenter de générer le résumé (peut échouer sans perdre la réunion)
+      setProcessingStatus(summaryMode === 'short' ? 'Génération du résumé court...' : 'Génération du résumé détaillé...');
+
+      let summaryResult: { summary?: string; title?: string } = {};
+      let summaryFailed = false;
+
+      try {
+        summaryResult = await generateSummary(finalTranscript, user?.id, 0, summaryMode);
+
+        console.log('✅ Résumé généré:', {
+          mode: summaryMode,
+          summaryLength: summaryResult.summary?.length,
+        });
+
+        // Mettre à jour la réunion avec le résumé
+        const finalTitle = meetingTitle || summaryResult.title || provisionalTitle;
+
+        const { error: updateErr } = await supabase
+          .from('meetings')
+          .update({
+            title: finalTitle,
+            summary: summaryResult.summary,
+            summary_short: summaryMode === 'short' ? summaryResult.summary : null,
+            summary_detailed: summaryMode === 'detailed' ? summaryResult.summary : null,
+          })
+          .eq('id', created.id);
+
+        if (updateErr) {
+          console.error('❌ Erreur mise à jour résumé:', updateErr);
+          summaryFailed = true;
+        }
+
+        // Mettre à jour summary_failed si la colonne existe (non bloquant)
+        try {
+          await supabase
+            .from('meetings')
+            .update({ summary_failed: false })
+            .eq('id', created.id);
+        } catch {
+          // La colonne n'existe pas encore, ignorer
+        }
+      } catch (summaryError) {
+        console.error('❌ Échec génération résumé (réunion sauvegardée quand même):', summaryError);
+        summaryFailed = true;
+
+        // Marquer la réunion comme ayant échoué la génération de résumé (non bloquant)
+        try {
+          await supabase
+            .from('meetings')
+            .update({ summary_failed: true })
+            .eq('id', created.id);
+        } catch {
+          // La colonne n'existe pas encore, ignorer
+        }
+      }
+
+      const finalTitle = meetingTitle || summaryResult.title || provisionalTitle;
       setCurrentMeetingId(created?.id || null);
 
       if (created) {
@@ -925,14 +1270,38 @@ function App() {
         resetRecording();
         setRecordingNotes('');
         setMeetingTitle('');
+        setSummaryPreference(null); // Réinitialiser pour le prochain enregistrement
         liveTranscriptRef.current = '';
         setPartialTranscripts([]);
         setCurrentMeetingId(null);
         lastProcessedSizeRef.current = 0;
         
         // Afficher le résumé immédiatement (sans audio pour l'instant)
-        console.log('🎯 Définition du résultat:', { title: finalTitle, summaryLength: summary?.length });
-        setResult({ title: finalTitle, transcript: displayTranscript, summary, audioUrl: null, meetingId: created?.id });
+        console.log('🎯 Définition du résultat:', {
+          title: finalTitle,
+          mode: summaryMode,
+          summaryLength: summaryResult.summary?.length,
+          summaryFailed,
+        });
+        setResult({
+          title: finalTitle,
+          transcript: displayTranscript,
+          summaryDetailed: summaryMode === 'detailed' ? summaryResult.summary || '' : '',
+          summaryShort: summaryMode === 'short' ? summaryResult.summary || '' : '',
+          summaryMode,
+          audioUrl: null,
+          meetingId: created?.id,
+          summaryFailed, // Pour afficher le bouton de régénération si nécessaire
+        });
+
+        // Si le résumé a échoué, informer l'utilisateur mais ne pas perdre la réunion
+        if (summaryFailed) {
+          await showAlert({
+            title: 'Réunion sauvegardée',
+            message: 'Votre réunion a été sauvegardée avec la transcription, mais la génération du résumé a échoué. Vous pouvez régénérer le résumé depuis les détails de la réunion.',
+            variant: 'warning',
+          });
+        }
         loadMeetings(true); // Force reload après création
         
         // Upload audio en arrière-plan (non-bloquant)
@@ -986,7 +1355,11 @@ function App() {
       }
     } catch (error) {
       console.error('Erreur processRecording:', error);
-      alert('Une erreur est survenue lors du traitement.');
+      await showAlert({
+        title: 'Erreur de traitement',
+        message: 'Une erreur est survenue lors du traitement.',
+        variant: 'danger',
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -1163,43 +1536,7 @@ function App() {
     (window as any).quotaCheckInterval = quotaCheckInterval;
     
     // Timer 15s: construire une fenêtre glissante 15s via WebAudio et l'envoyer
-    partialAnalysisTimerRef.current = window.setInterval(async () => {
-      try {
-        const wav = await getLast15sWav();
-        if (!wav || wav.size < 5000) return;
-        console.log(`📝 Transcription fenêtre 15s ${(wav.size/1024).toFixed(0)} KB`);
-        const text = await transcribeAudio(wav, 0, `window15s_${Date.now()}.wav`);
-        if (text && text.trim().length > 5) {
-          // Déduplication: vérifier si ce texte n'existe pas déjà
-          setPartialTranscripts(prev => {
-            const normalizedText = text.trim().toLowerCase();
-            const isDuplicate = prev.some(existing => 
-              existing.trim().toLowerCase() === normalizedText ||
-              existing.trim().toLowerCase().includes(normalizedText) ||
-              normalizedText.includes(existing.trim().toLowerCase())
-            );
-            
-            if (isDuplicate) {
-              console.log('🔄 Transcription dupliquée ignorée:', text.substring(0, 50) + '...');
-              return prev; // Ne pas ajouter le doublon
-            }
-            
-            console.log('✅ Nouvelle transcription ajoutée:', text.substring(0, 50) + '...');
-            return [...prev, text];
-          });
-          
-          // Construire un transcript cumulatif robuste (évite le stale state)
-          liveTranscriptRef.current = `${(liveTranscriptRef.current || '').trim()} ${text}`.trim();
-          // Fenêtre glissante: 2 derniers chunks pour suggestions plus contextuelles
-          recentChunksRef.current.push(text);
-          if (recentChunksRef.current.length > 2) recentChunksRef.current.shift();
-          const twoChunkWindow = recentChunksRef.current.join(' ').trim();
-          await analyzePartialTranscript(twoChunkWindow);
-        }
-      } catch (e) {
-        console.error('❌ Erreur transcription 15s:', e);
-      }
-    }, 15000);
+    startPartialAnalysisTimer();
   };
 
   const fetchMeetingDetails = useCallback(async (meetingId: string) => {
@@ -1235,7 +1572,11 @@ function App() {
       const detailedMeeting = await fetchMeetingDetails(meeting.id);
 
       if (!detailedMeeting) {
-        alert('❌ Réunion introuvable');
+        await showAlert({
+          title: 'Réunion introuvable',
+          message: '❌ Réunion introuvable',
+          variant: 'warning',
+        });
         return;
       }
 
@@ -1244,7 +1585,11 @@ function App() {
       setView('detail');
     } catch (error) {
       console.error('Erreur chargement réunion:', error);
-      alert('❌ Erreur lors du chargement de la réunion');
+      await showAlert({
+        title: 'Erreur de chargement',
+        message: '❌ Erreur lors du chargement de la réunion',
+        variant: 'danger',
+      });
     } finally {
       setIsMeetingDetailLoading(false);
     }
@@ -1257,7 +1602,11 @@ function App() {
       const detailedMeeting = await fetchMeetingDetails(meetingId);
 
       if (!detailedMeeting) {
-        alert('❌ Réunion introuvable');
+        await showAlert({
+          title: 'Réunion introuvable',
+          message: '❌ Réunion introuvable',
+          variant: 'warning',
+        });
         return;
       }
 
@@ -1266,7 +1615,11 @@ function App() {
       setView('detail');
     } catch (error) {
       console.error('Erreur chargement réunion:', error);
-      alert('❌ Erreur lors du chargement de la réunion');
+      await showAlert({
+        title: 'Erreur de chargement',
+        message: '❌ Erreur lors du chargement de la réunion',
+        variant: 'danger',
+      });
     } finally {
       setIsMeetingDetailLoading(false);
     }
@@ -1341,9 +1694,14 @@ function App() {
       return;
     }
 
+    // Ne demander le mode que si l'utilisateur n'a pas configuré de mode par défaut
+    if (!showSummaryPreferenceModal && !defaultSummaryModeSetting) {
+      promptSummaryPreference();
+    }
+
     skipProcessingRef.current = false;
     stopRecording();
-  }, [isRecording, recordingTime, stopRecording]);
+  }, [isRecording, recordingTime, stopRecording, showSummaryPreferenceModal, promptSummaryPreference, defaultSummaryModeSetting]);
 
   const handleShortRecordingContinue = useCallback(() => {
     setShowShortRecordingModal(false);
@@ -1356,6 +1714,29 @@ function App() {
     setShortRecordingSeconds(0);
     stopRecording();
   }, [stopRecording]);
+
+  const handleSummaryPreferenceSelect = useCallback((mode: SummaryMode) => {
+    console.log('📝 Mode de résumé sélectionné:', mode);
+    setSummaryPreference(mode);
+    setShowSummaryPreferenceModal(false);
+    setShowDefaultModeReminder(false);
+  }, []);
+
+  const handleSummaryPreferenceCancel = useCallback(() => {
+    console.log('❌ Annulation du traitement et suppression de l\'audio courant');
+    setShowSummaryPreferenceModal(false);
+    setSummaryPreference(null);
+    setSummaryWordEstimate(0);
+    skipProcessingRef.current = true;
+    setShowDefaultModeReminder(false);
+  }, []);
+
+  const handleOpenSettingsFromModal = useCallback(() => {
+    setShowSummaryPreferenceModal(false);
+    setShowDefaultModeReminder(false);
+    setView('settings');
+    window.location.hash = 'settings';
+  }, []);
 
   const handleOpenLongRecordingReminder = () => {
     setRecordingReminderToast(null);
@@ -1454,15 +1835,57 @@ function App() {
   }
 
   if (view === 'gmail-callback') {
-    return <GmailCallback />;
+    return (
+      <>
+        <GmailCallback />
+        {showUpdatePasswordModal && (
+          <UpdatePasswordModal
+            onSuccess={async () => {
+              setShowUpdatePasswordModal(false);
+              await showAlert({
+                title: 'Succès',
+                message: 'Votre mot de passe a été réinitialisé avec succès ! Veuillez vous reconnecter avec votre nouveau mot de passe.',
+                variant: 'success',
+              });
+              // Déconnecter l'utilisateur pour qu'il se reconnecte avec le nouveau mot de passe
+              await supabase.auth.signOut();
+              setView('landing');
+              window.history.replaceState({}, '', '#');
+            }}
+          />
+        )}
+      </>
+    );
   }
 
   if (view === 'landing') {
-    return <LandingPage onGetStarted={() => setView('auth')} />;
+    return (
+      <>
+        <LandingPage onGetStarted={() => setView('auth')} />
+        {showUpdatePasswordModal && (
+          <UpdatePasswordModal
+            onSuccess={async () => {
+              setShowUpdatePasswordModal(false);
+              await showAlert({
+                title: 'Succès',
+                message: 'Votre mot de passe a été réinitialisé avec succès ! Veuillez vous reconnecter avec votre nouveau mot de passe.',
+                variant: 'success',
+              });
+              // Déconnecter l'utilisateur pour qu'il se reconnecte avec le nouveau mot de passe
+              await supabase.auth.signOut();
+              setView('landing');
+              window.history.replaceState({}, '', '#');
+            }}
+          />
+        )}
+      </>
+    );
   }
 
   if (!user) {
-    return <Login onSuccess={() => {
+    return (
+      <>
+        <Login onSuccess={async () => {
       console.log('✅ Login réussi, initialisation...');
       try {
         setIsAuthLoading(false);
@@ -1479,16 +1902,50 @@ function App() {
         console.log('✅ Vue changée avec succès');
       } catch (error) {
         console.error('❌ Erreur après login:', error);
-        alert('Erreur après connexion: ' + error);
+        await showAlert({
+          title: 'Erreur de connexion',
+          message: `Erreur après connexion: ${error}`,
+          variant: 'danger',
+        });
       }
-    }} />;
+    }} />
+        {showUpdatePasswordModal && (
+          <UpdatePasswordModal
+            onSuccess={async () => {
+              setShowUpdatePasswordModal(false);
+              await showAlert({
+                title: 'Succès',
+                message: 'Votre mot de passe a été réinitialisé avec succès ! Veuillez vous reconnecter avec votre nouveau mot de passe.',
+                variant: 'success',
+              });
+              // Déconnecter l'utilisateur pour qu'il se reconnecte avec le nouveau mot de passe
+              await supabase.auth.signOut();
+              setView('landing');
+              window.history.replaceState({}, '', '#');
+            }}
+          />
+        )}
+      </>
+    );
   }
 
   // Guard contre les erreurs de rendu
   try {
-    console.log('🎨 Render principal, view:', view, 'user:', !!user);
+    console.log('🎨 Render principal, view:', view, 'user:', !!user, 'subscription:', subscription, 'isSubscriptionLoading:', isSubscriptionLoading);
   } catch (e) {
     console.error('❌ Erreur dans render:', e);
+  }
+
+  // Afficher un écran de chargement pendant la vérification de l'abonnement
+  if (user && isSubscriptionLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-red-50 to-amber-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-coral-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-cocoa-600 text-lg">Vérification de votre abonnement...</p>
+        </div>
+      </div>
+    );
   }
 
   // Bloquer l'accès si pas d'abonnement actif (sauf pour la page subscription)
@@ -1531,7 +1988,7 @@ function App() {
             <div className="flex items-center gap-3 md:gap-4">
               <img src="/logohallia.png" alt="Logo Hallia" className="w-32 h-10 md:w-40 md:h-12 object-contain" />
               <div>
-                <h1 className="text-lg md:text-2xl font-bold bg-gradient-to-r from-coral-500 to-sunset-500 bg-clip-text text-transparent">Meeting recorder</h1>
+                <h1 className="text-lg md:text-2xl font-bold bg-gradient-to-r from-coral-500 to-sunset-500 bg-clip-text text-transparent">HALL recorder</h1>
               </div>
             </div>
             {/* Bouton déconnexion mobile uniquement */}
@@ -1683,11 +2140,11 @@ function App() {
           {view === 'record' ? (
             <>
               {/* Contenu principal de l'enregistrement */}
-              <div className="flex-1 px-4 md:px-8 py-4 md:py-8 overflow-auto flex items-center justify-center">
+              <div className="flex-1 px-4 md:px-8 py-4 md:py-8 overflow-auto">
               {!isRecording ? (
-                <div className="relative bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-12 border-2 border-orange-100 overflow-hidden w-full max-w-5xl">
+                <div className="relative bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-12 border-2 border-orange-100 overflow-hidden w-full max-w-5xl mx-auto">
                   <div className="absolute inset-0 bg-gradient-to-br from-coral-50/30 via-transparent to-sunset-50/30 pointer-events-none"></div>
-                  <div className="relative flex flex-col items-center justify-center py-8">
+                  <div className="relative flex flex-col items-center py-8">
                     <div className="mb-12">
                     <RecordingControls
                       isRecording={isRecording}
@@ -1740,9 +2197,9 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div className="relative bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-12 border-2 border-orange-100 overflow-auto w-full max-w-7xl h-full">
+                <div className="relative bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-12 border-2 border-orange-100 w-full max-w-7xl mx-auto">
                   <div className="absolute inset-0 bg-gradient-to-br from-coral-50/20 via-transparent to-sunset-50/20 pointer-events-none"></div>
-                  <div className="relative flex flex-col items-center py-4 md:py-8 h-full">
+                  <div className="relative flex flex-col items-center py-4 md:py-8">
                     <button
                       onClick={handleStopRecordingRequest}
                       className="mb-6 md:mb-8 group transition-transform hover:scale-105 active:scale-95 cursor-pointer"
@@ -1931,7 +2388,7 @@ function App() {
                     title="Rafraîchir"
                   >
                     <svg 
-                      className={`w-5 h-5 text-coral-600 transition-transform ${isMeetingsLoading ? 'animate-spin' : 'group-hover:rotate-180'}`}
+                      className={`w-5 h-5 text-coral-600 transition-transform ${isRecentRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`}
                       fill="none" 
                       stroke="currentColor" 
                       viewBox="0 0 24 24"
@@ -1941,7 +2398,21 @@ function App() {
                   </button>
                 </div>
                 <div className="space-y-3">
-                  {meetings.slice(0, 10).map((meeting) => (
+                  {isRecentLoading && (
+                    <>
+                      {[...Array(3)].map((_, idx) => (
+                        <div
+                          key={`recent-skeleton-${idx}`}
+                          className="animate-pulse bg-gradient-to-br from-peach-50 to-coral-50 rounded-xl p-4 border-2 border-orange-100"
+                        >
+                          <div className="h-4 bg-white/60 rounded w-3/4 mb-3" />
+                          <div className="h-3 bg-white/40 rounded w-1/2" />
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {!isRecentLoading && (console.log('📋 Sidebar: meetings:', meetings.length, 'first:', meetings[0]?.title, 'created_at:', meetings[0]?.created_at), meetings.slice(0, 10).map((meeting) => (
                     <div
                       key={meeting.id}
                       onClick={() => {
@@ -1966,9 +2437,9 @@ function App() {
                         </span>
                       </div>
                     </div>
-                  ))}
-                  
-                  {meetings.length === 0 && (
+                  )))}
+
+                  {!isRecentLoading && meetings.length === 0 && (
                     <div className="text-center py-8">
                       <p className="text-cocoa-500 text-sm">Aucune réunion enregistrée</p>
                     </div>
@@ -2035,7 +2506,7 @@ function App() {
               {/* Contenu des onglets - Garder les deux montés pour préserver l'état */}
               <div style={{ display: historyTab === 'meetings' ? 'block' : 'none' }}>
                 <MeetingHistory
-                  key="meeting-history-persistent"
+                  key={`meeting-history-${meetings.length}-${meetings[0]?.id || 'empty'}`}
                   meetings={meetings}
                   onDelete={handleDelete}
                   onView={handleViewMeeting}
@@ -2065,6 +2536,11 @@ function App() {
                       .eq('user_id', user.id)
                       .maybeSingle();
 
+                    const summaryForEmail =
+                      ((meeting.summary_mode as SummaryMode) || 'detailed') === 'short'
+                        ? meeting.summary_short ?? meeting.summary ?? ''
+                        : meeting.summary_detailed ?? meeting.summary ?? '';
+
                     const body = await generateEmailBody({
                       title: meeting.title,
                       date: formatDate(meeting.created_at),
@@ -2073,7 +2549,7 @@ function App() {
                         ? `${meeting.participant_first_name} ${meeting.participant_last_name}`
                         : undefined,
                       participantEmail: meeting.participant_email || undefined,
-                      summary: meeting.summary || '',
+                      summary: summaryForEmail,
                       attachments: [],
                       senderName: '',
                       signatureText: settings?.signature_text || '',
@@ -2085,7 +2561,8 @@ function App() {
                     setMeetingToEmail(meeting);
                   }}
                   onUpdateMeetings={() => loadMeetings(true)}
-                  isLoading={isMeetingsLoading}
+                  isLoading={isHistoryInitialLoading}
+                  isRefreshing={isHistoryRefreshing}
                 userId={user?.id}
                 />
               </div>
@@ -2110,7 +2587,13 @@ function App() {
               }}
             />
           ) : view === 'settings' ? (
-            <Settings userId={user?.id || ''} />
+            <Settings
+              userId={user?.id || ''}
+              onDefaultSummaryModeChange={(mode) => {
+                setDefaultSummaryModeSetting(mode);
+                setIsDefaultSummaryModeLoaded(true);
+              }}
+            />
           ) : view === 'subscription' ? (
             <Subscription userId={user?.id || ''} />
           ) : view === 'contact' ? (
@@ -2243,7 +2726,11 @@ function App() {
               
               if (error) {
                 console.error('❌ Erreur chargement réunion:', error);
-                alert('❌ Erreur lors du chargement de la réunion');
+                await showAlert({
+                  title: 'Erreur de chargement',
+                  message: '❌ Erreur lors du chargement de la réunion',
+                  variant: 'danger',
+                });
                 return;
               }
               
@@ -2255,11 +2742,19 @@ function App() {
                 handleViewMeeting(meeting as Meeting);
               } else {
                 console.warn('⚠️ Réunion introuvable:', meetingId);
-                alert('❌ Réunion introuvable');
+                await showAlert({
+                  title: 'Réunion introuvable',
+                  message: '❌ Réunion introuvable',
+                  variant: 'warning',
+                });
               }
             } catch (error: any) {
               console.error('❌ Erreur:', error);
-              alert('❌ Erreur lors du chargement de la réunion');
+              await showAlert({
+                title: 'Erreur de chargement',
+                message: '❌ Erreur lors du chargement de la réunion',
+                variant: 'danger',
+              });
             }
           }}
         />
@@ -2271,17 +2766,20 @@ function App() {
         status={processingStatus || 'Traitement en cours...'}
       />
 
-      {result && result.title && result.summary && (
+      {result && result.title && (result.summaryDetailed || result.summaryShort || result.summaryFailed) && (
         <>
-          {console.log('🎯 Rendu MeetingResult:', { title: result.title, hasSummary: !!result.summary })}
+          {console.log('🎯 Rendu MeetingResult:', { title: result.title, hasDetailed: !!result.summaryDetailed, hasShort: !!result.summaryShort, summaryFailed: result.summaryFailed })}
         <div className="fixed inset-0 z-[100]">
           <MeetingResult
             title={result.title}
             transcript={result.transcript}
-            summary={result.summary}
+            summaryDetailed={result.summaryDetailed}
+            summaryShort={result.summaryShort}
+            defaultSummaryMode={result.summaryMode}
             suggestions={suggestions}
             userId={user?.id || ''}
             meetingId={result.meetingId}
+            summaryFailed={result.summaryFailed}
             onClose={() => setResult(null)}
             onUpdate={() => loadMeetings(true)}
           />
@@ -2301,20 +2799,34 @@ function App() {
           onSend={async (emailData) => {
             try {
               console.log('📧 Envoi email depuis historique...');
+
+              // Utiliser la méthode sélectionnée dans le composeur (pas les settings)
+              const selectedMethod = emailData.method === 'app' ? 'local' : emailData.method;
+              console.log('🔍 Méthode sélectionnée dans EmailComposer:', emailData.method, '→', selectedMethod);
+
+              // 🎯 NOUVELLE APPROCHE: Envoi individuel pour tracking précis
+              const { sendIndividualEmails } = await import('./services/individualEmailSender');
+
+              const result = await sendIndividualEmails(
+                emailData,
+                selectedMethod as 'smtp' | 'gmail' | 'local',
+                meetingToEmail?.id,
+                user.id
+              );
+
+              if (!result.success && result.failed.length > 0) {
+                throw new Error(`Échec d'envoi pour : ${result.failed.join(', ')}`);
+              }
+
+              setEmailSuccessData({ recipientCount: result.totalSent, method: emailData.method === 'app' ? 'local' : emailData.method });
+              setShowEmailSuccessModal(true);
+              setMeetingToEmail(null);
+              setEmailBody('');
               
-              // Charger la méthode d'envoi de l'utilisateur
-              const { data: settings } = await supabase
-                .from('user_settings')
-                .select('email_method, gmail_connected, smtp_host')
-                .eq('user_id', user.id)
-                .maybeSingle();
+              console.log(`✅ ${result.totalSent} emails envoyés individuellement pour tracking précis`);
+              return;
 
-              const emailMethod = settings?.email_method === 'gmail' && settings?.gmail_connected
-                ? 'gmail'
-                : settings?.email_method === 'smtp' && settings?.smtp_host
-                ? 'smtp'
-                : 'local';
-
+              /* CODE ANCIEN - REMPLACÉ PAR sendIndividualEmails()
               const { data: { session } } = await supabase.auth.getSession();
               if (!session) throw new Error('Non authentifié');
 
@@ -2427,9 +2939,14 @@ function App() {
 
               setMeetingToEmail(null);
               setEmailBody('');
+              FIN CODE ANCIEN COMMENTÉ */
             } catch (error: any) {
               console.error('❌ Erreur envoi email:', error);
-              alert('❌ Erreur lors de l\'envoi: ' + error.message);
+              await showAlert({
+                title: 'Erreur d\'envoi',
+                message: `❌ Erreur lors de l'envoi: ${error.message}`,
+                variant: 'danger',
+              });
             }
           }}
           onClose={() => {
@@ -2454,6 +2971,17 @@ function App() {
         minimumSeconds={MIN_RECORDING_SECONDS}
         onContinueRecording={handleShortRecordingContinue}
         onDiscardRecording={handleShortRecordingDiscard}
+      />
+
+      <SummaryPreferenceModal
+        isOpen={showSummaryPreferenceModal}
+        recommendedMode={recommendedSummaryMode}
+        estimatedWordCount={summaryWordEstimate}
+        recordingDuration={recordingTime}
+        showDefaultReminder={showDefaultModeReminder}
+        onOpenSettings={handleOpenSettingsFromModal}
+        onSelect={handleSummaryPreferenceSelect}
+        onCancel={handleSummaryPreferenceCancel}
       />
 
       {/* Modal de quota atteint */}
@@ -2515,6 +3043,24 @@ function App() {
           currentPlan={subscription?.plan_type}
           upgradeOnly={subscriptionUpgradeOnly}
           canClose={!!(subscription && subscription.is_active)}
+        />
+      )}
+
+      {/* Modal de mise à jour du mot de passe (PASSWORD_RECOVERY) */}
+      {showUpdatePasswordModal && (
+        <UpdatePasswordModal
+          onClose={() => setShowUpdatePasswordModal(false)}
+          onSuccess={async () => {
+            setShowUpdatePasswordModal(false);
+            await showAlert({
+              title: 'Succès',
+              message: 'Votre mot de passe a été réinitialisé avec succès !',
+              variant: 'success',
+            });
+            // Rediriger vers record après succès
+            setView('record');
+            window.history.replaceState({ view: 'record' }, '', '#record');
+          }}
         />
       )}
     </div>

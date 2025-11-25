@@ -55,21 +55,110 @@ Deno.serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   try {
-    const { data: history, error } = await supabase
+    // Chercher l'email correspondant au tracking_id ET au recipient si fourni
+    let query = supabase
       .from("email_history")
-      .select("id, first_opened_at")
-      .eq("tracking_id", trackingId)
-      .maybeSingle();
+      .select("id, first_opened_at, sent_at, recipients")
+      .eq("tracking_id", trackingId);
 
-    if (error || !history) {
+    // Si on a un recipient, chercher l'email spécifique à ce destinataire
+    if (normalizedRecipient) {
+      query = query.ilike("recipients", `%${normalizedRecipient}%`);
+    }
+
+    const { data: historyList, error } = await query.order("sent_at", { ascending: false });
+
+    if (error || !historyList || historyList.length === 0) {
       console.error("Tracking id not found", trackingId, error);
       return new Response(PIXEL_DATA, { status: 200, headers });
     }
 
+    // Prendre le premier résultat (le plus récent si plusieurs)
+    const history = historyList[0];
+
     const ipAddress = getClientIp(req);
     const userAgent = req.headers.get("user-agent") ?? null;
 
+    // Filtrer les bots et scanners connus (liste étendue pour meilleure détection)
+    const suspiciousPatterns = [
+      /bot/i,
+      /crawler/i,
+      /spider/i,
+      /scan/i,
+      /check/i,
+      /monitor/i,
+      /preview/i,
+      /prerender/i,
+      /validator/i,
+      /fetcher/i,
+      /googleimageproxy/i,      // Gmail proxy d'images
+      /google-proxy/i,
+      /yahoo.*slurp/i,
+      /outlook/i,               // Outlook preview
+      /microsoft.*office/i,
+      /ms-office/i,
+      /windows-mail/i,
+      /mailchimp/i,
+      /sendgrid/i,
+      /mailgun/i,
+      /postmark/i,
+      /sparkpost/i,
+      /amazonses/i,
+      /barracuda/i,             // Security scanners
+      /proofpoint/i,
+      /mimecast/i,
+      /messagelabs/i,
+      /websense/i,
+      /bluecoat/i,
+      /fortinet/i,
+      /sophos/i,
+      /symantec/i,
+      /mcafee/i,
+      /kaspersky/i,
+      /antivirus/i,
+      /security/i,
+      /safelinks\.protection/i, // Microsoft SafeLinks
+      /url-protection/i,
+      /link-protection/i,
+    ];
+
+    const isSuspicious = userAgent && suspiciousPatterns.some(pattern => pattern.test(userAgent));
+
+    // Vérifier le délai depuis l'envoi
+    // Réduit à 5 secondes car la détection par user-agent est maintenant plus robuste
+    // Les vrais humains prennent au moins quelques secondes pour ouvrir un email
+    const sentAt = history.sent_at ? new Date(history.sent_at).getTime() : 0;
+    const now = Date.now();
+    const timeSinceSent = (now - sentAt) / 1000; // en secondes
+    const MIN_DELAY_SECONDS = 5;
+
+    // Ouverture suspecte = trop rapide ET pas de user-agent reconnaissable comme navigateur
+    const isKnownBrowser = userAgent && (
+      /chrome/i.test(userAgent) ||
+      /firefox/i.test(userAgent) ||
+      /safari/i.test(userAgent) ||
+      /edge/i.test(userAgent) ||
+      /opera/i.test(userAgent) ||
+      /mobile/i.test(userAgent)
+    );
+
+    // On ignore seulement si:
+    // 1. C'est un bot/scanner connu
+    // 2. OU c'est trop rapide ET ce n'est pas un navigateur connu
+    const isTooEarly = sentAt > 0 && timeSinceSent < MIN_DELAY_SECONDS && !isKnownBrowser;
+
+    if (isSuspicious) {
+      console.log(`🤖 Suspicious user agent ignored: ${userAgent}`);
+      return new Response(PIXEL_DATA, { status: 200, headers });
+    }
+
+    if (isTooEarly) {
+      console.log(`⏰ Email opened too soon (${timeSinceSent.toFixed(1)}s) with unknown agent, likely a scanner`);
+      return new Response(PIXEL_DATA, { status: 200, headers });
+    }
+
     if (!history.first_opened_at) {
+      console.log(`✅ Valid email open tracked (${timeSinceSent.toFixed(1)}s after send)`);
       await supabase
         .from("email_history")
         .update({
@@ -79,29 +168,19 @@ Deno.serve(async (req) => {
         .eq("id", history.id);
     }
 
-    if (normalizedRecipient) {
-      const { data: existingRecipient } = await supabase
-        .from("email_open_events")
-        .select("id")
-        .eq("email_history_id", history.id)
-        .eq("recipient_email", normalizedRecipient)
-        .maybeSingle();
-
-      if (!existingRecipient) {
-        await supabase.from("email_open_events").insert({
-          email_history_id: history.id,
-          recipient_email: normalizedRecipient,
-          ip_address: ipAddress,
-          user_agent: userAgent,
-        });
-      }
-    } else {
+    // Enregistrer CHAQUE ouverture (comme Mailtrack)
+    // On enregistre toutes les ouvertures pour avoir un historique complet
+    if (!isSuspicious && !isTooEarly) {
+      console.log(`📬 Recording open event for ${normalizedRecipient || 'unknown'}`);
       await supabase.from("email_open_events").insert({
         email_history_id: history.id,
-        recipient_email: null,
+        recipient_email: normalizedRecipient,
         ip_address: ipAddress,
         user_agent: userAgent,
       });
+
+      // Mettre à jour le compteur d'ouvertures sur email_history
+      await supabase.rpc('increment_open_count', { history_id: history.id });
     }
   } catch (err) {
     console.error("Error tracking email open", err);

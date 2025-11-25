@@ -10,7 +10,7 @@ const supabase = createClient(
 const stripeSecret = Deno.env.get('STRIPE_SECRET_KEY')!;
 const stripe = new Stripe(stripeSecret, {
   appInfo: {
-    name: 'Meeting Recorder',
+    name: 'HALL Recorder',
     version: '1.0.0',
   },
 });

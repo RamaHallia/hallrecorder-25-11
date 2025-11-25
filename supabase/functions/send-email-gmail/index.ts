@@ -1,321 +1,236 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey"
 };
-
-interface EmailRequest {
-  to: string;
-  subject: string;
-  html: string;
-  attachments?: Array<{
-    filename: string;
-    content: string; // base64
-    contentType: string;
-  }>;
+/* ---------- Utils encodage ---------- */ // RFC 2047 pour en-têtes UTF-8 (Subject, etc.)
+function encodeHeaderUtf8(value) {
+  const b64 = btoa(unescape(encodeURIComponent(value)));
+  return `=?UTF-8?B?${b64}?=`;
 }
-
-// Fonction pour encoder en base64url (sans padding) - ROBUSTE avec chunking
-function base64UrlEncode(data: Uint8Array): string {
-  const chunkSize = 32768; // 32KB chunks pour éviter memory limit
-  let base64 = '';
-  
-  for (let i = 0; i < data.length; i += chunkSize) {
-    const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
-    const chunkArray = Array.from(chunk);
-    base64 += btoa(String.fromCharCode.apply(null, chunkArray));
+// base64url sans padding, efficace
+function base64UrlEncodeBytes(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000; // ~32KB
+  for(let i = 0; i < bytes.length; i += chunkSize){
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
   }
-  
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const base64 = btoa(binary);
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
-
-// Fonction pour créer un message MIME ROBUSTE avec multipart
-function createMimeMessage(
-  to: string,
-  subject: string,
-  html: string,
-  attachments?: EmailRequest['attachments']
-): string {
-  const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-  
-  const lines: string[] = [];
-  
-  // Headers principaux
+// wrap à 76 colonnes (RFC 2045)
+function wrap76(b64) {
+  const out = [];
+  for(let i = 0; i < b64.length; i += 76)out.push(b64.slice(i, i + 76));
+  return out.join('\r\n');
+}
+// fallback texte brut à partir du HTML
+function htmlToTextFallback(html) {
+  return html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+// Message-ID simple
+function makeMessageId(domainHint = 'localhost') {
+  const rand = Math.random().toString(36).slice(2);
+  const ts = Date.now();
+  return `<${rand}.${ts}@${domainHint}>`;
+}
+function createMimeMessage(opts) {
+  const { from, to, subject, html, attachments, messageIdDomainHint } = opts;
+  const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const altBoundary = boundary + '_ALT';
+  const lines = [];
+  const date = new Date().toUTCString();
+  const subj = encodeHeaderUtf8(subject);
+  const msgId = makeMessageId(messageIdDomainHint || (from?.split('@')[1] ?? 'localhost'));
+  // En-têtes
+  lines.push(`From: ${from ?? 'me'}`); // "me" accepté par Gmail API
   lines.push(`To: ${to}`);
-  lines.push(`Subject: ${subject}`);
+  lines.push(`Subject: ${subj}`);
+  lines.push(`Date: ${date}`);
+  lines.push(`Message-ID: ${msgId}`);
   lines.push('MIME-Version: 1.0');
   lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
   lines.push('');
-  
-  // Partie HTML
+  // Partie alternative (text + html)
   lines.push(`--${boundary}`);
+  lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+  lines.push('');
+  // text/plain
+  const textFallback = htmlToTextFallback(html);
+  const textB64 = btoa(unescape(encodeURIComponent(textFallback)));
+  lines.push(`--${altBoundary}`);
+  lines.push('Content-Type: text/plain; charset="UTF-8"');
+  lines.push('Content-Transfer-Encoding: base64');
+  lines.push('');
+  lines.push(wrap76(textB64));
+  lines.push('');
+  // text/html
+  const htmlB64 = btoa(unescape(encodeURIComponent(html)));
+  lines.push(`--${altBoundary}`);
   lines.push('Content-Type: text/html; charset="UTF-8"');
-  lines.push('Content-Transfer-Encoding: quoted-printable');
+  lines.push('Content-Transfer-Encoding: base64');
   lines.push('');
-  lines.push(html);
+  lines.push(wrap76(htmlB64));
   lines.push('');
-  
-  // Pièces jointes
-  if (attachments && attachments.length > 0) {
-    for (const att of attachments) {
+  lines.push(`--${altBoundary}--`);
+  lines.push('');
+  // Pièces jointes (inclut inline avec Content-ID)
+  if (attachments?.length) {
+    for (const att of attachments){
+      const cleanB64 = att.content.replace(/\r?\n/g, '').replace(/^data:[^;]+;base64,/, '');
       lines.push(`--${boundary}`);
       lines.push(`Content-Type: ${att.contentType}; name="${att.filename}"`);
       lines.push('Content-Transfer-Encoding: base64');
-      lines.push(`Content-Disposition: attachment; filename="${att.filename}"`);
-      lines.push('');
-      
-      // Découper le base64 en lignes de 76 caractères (standard RFC)
-      const base64Content = att.content;
-      for (let i = 0; i < base64Content.length; i += 76) {
-        lines.push(base64Content.substring(i, i + 76));
+      const disposition = att.inline ? 'inline' : 'attachment';
+      lines.push(`Content-Disposition: ${disposition}; filename="${att.filename}"`);
+      if (att.inline && att.contentId) {
+        lines.push(`Content-ID: <${att.contentId}>`);
       }
+      lines.push('');
+      lines.push(wrap76(cleanB64));
       lines.push('');
     }
   }
-  
-  // Fermeture
   lines.push(`--${boundary}--`);
-  
   return lines.join('\r\n');
 }
-
-// Fonction pour rafraîchir le token d'accès
-async function refreshAccessToken(
-  refreshToken: string, 
-  clientId: string, 
-  clientSecret: string
-): Promise<{ access_token: string; expires_in: number }> {
+/* ---------- OAuth & Gmail send ---------- */ async function refreshAccessToken(refreshToken, clientId, clientSecret) {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/x-www-form-urlencoded'
     },
     body: new URLSearchParams({
       client_id: clientId,
       client_secret: clientSecret,
       refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-    }),
+      grant_type: 'refresh_token'
+    })
   });
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error('Token refresh error:', error);
-    throw new Error('Failed to refresh access token');
-  }
-
+  if (!response.ok) throw new Error(`Failed to refresh access token: ${await response.text()}`);
   return await response.json();
 }
-
-// Fonction pour envoyer le message via Gmail API
-async function sendGmailMessage(
-  accessToken: string, 
-  message: { raw: string }
-): Promise<{ id: string; threadId: string }> {
+async function sendGmailMessage(accessToken, message) {
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json'
     },
-    body: JSON.stringify(message),
+    body: JSON.stringify(message)
   });
-
   if (!response.ok) {
     const error = await response.text();
-    console.error('Gmail API error:', error);
     throw new Error(`Gmail API error: ${response.status} - ${error}`);
   }
-
   return await response.json();
 }
-
-Deno.serve(async (req: Request) => {
+/* ---------- Handler ---------- */ Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 200,
-      headers: corsHeaders,
+      headers: corsHeaders
     });
   }
-
   try {
-    console.log('🚀 [Gmail] Début du traitement');
-    
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Récupérer l'utilisateur authentifié
+    // Auth
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('Missing Authorization header');
-    }
-
+    if (!authHeader) throw new Error('Missing Authorization header');
     const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-
-    if (userError || !user) {
-      throw new Error('Unauthorized');
-    }
-
-    console.log('✅ [Gmail] User authentifié:', user.email);
-
-    // Récupérer les paramètres de l'email
-    const emailRequest: EmailRequest = await req.json();
-    const { to, subject, html, attachments } = emailRequest;
-
-    console.log('📧 [Gmail] Destinataire:', to);
-    console.log('📧 [Gmail] Sujet:', subject);
-    console.log('📎 [Gmail] Nombre de PJ:', attachments?.length || 0);
-
-    // Vérifier la taille totale des pièces jointes (limite: 10MB pour Edge Functions)
-    if (attachments && attachments.length > 0) {
-      // Vérifier le nombre de PJ
+    if (userError || !user) throw new Error('Unauthorized');
+    // Payload
+    const body = await req.json();
+    const { to, subject, html, attachments, from } = body;
+    // Limites côté Edge Function (10 MB cumul PJ)
+    if (attachments?.length) {
       if (attachments.length > 10) {
-        throw new Error(
-          `Trop de pièces jointes (${attachments.length}). ` +
-          `Maximum: 10 fichiers par email.`
-        );
+        throw new Error(`Trop de pièces jointes (${attachments.length}). Maximum: 10.`);
       }
-      
-      const totalSize = attachments.reduce((sum, att) => {
-        // Le base64 est déjà encodé, calculer la taille réelle
-        const estimatedSize = (att.content.length * 3) / 4;
-        return sum + estimatedSize;
+      const totalSize = attachments.reduce((sum, att)=>{
+        const len = att.content.replace(/\r?\n/g, '').replace(/^data:[^;]+;base64,/, '').length;
+        // base64 -> bytes ~ 3/4 (ignorer padding)
+        return sum + Math.floor(len * 3 / 4);
       }, 0);
-      
-      // Limite réduite à 10MB pour éviter memory limit des Edge Functions
-      // (le message MIME + encodage peut faire x3 en mémoire)
-      const maxSize = 10 * 1024 * 1024; // 10MB
+      const maxSize = 10 * 1024 * 1024;
       const totalMB = Math.round(totalSize / 1024 / 1024 * 10) / 10;
-      
-      console.log(`📎 [Gmail] Taille totale des PJ: ${totalMB}MB (${attachments.length} fichiers)`);
-      
       if (totalSize > maxSize) {
-        throw new Error(
-          `Les pièces jointes sont trop volumineuses (${totalMB}MB). ` +
-          `Limite pour Edge Functions: 10MB. ` +
-          `\n\nSolutions:\n` +
-          `• Réduire la taille des fichiers\n` +
-          `• Envoyer en plusieurs emails\n` +
-          `• Utiliser un service de partage (Google Drive, Dropbox, etc.)`
-        );
+        throw new Error(`Les pièces jointes sont trop volumineuses (${totalMB} MB). Limite côté Edge: 10 MB.\n\n` + `Solutions:\n• Réduire/compresser les fichiers\n• Envoyer en plusieurs emails\n• Utiliser un lien (Supabase Storage URL signée, Google Drive, etc.)`);
       }
     }
-
-    // Récupérer les tokens Gmail de l'utilisateur
-    const { data: settings, error: settingsError } = await supabase
-      .from('user_settings')
-      .select('gmail_access_token, gmail_refresh_token, gmail_token_expiry, gmail_connected')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (settingsError || !settings) {
-      throw new Error('Impossible de récupérer les paramètres Gmail');
-    }
-
+    // Récupérer/rafraîchir tokens Gmail
+    const { data: settings, error: settingsError } = await supabase.from('user_settings').select('gmail_access_token, gmail_refresh_token, gmail_token_expiry, gmail_connected').eq('user_id', user.id).maybeSingle();
+    if (settingsError || !settings) throw new Error('Impossible de récupérer les paramètres Gmail');
     if (!settings.gmail_connected || !settings.gmail_refresh_token) {
       throw new Error('Gmail non connecté. Veuillez vous connecter à Gmail dans les Paramètres.');
     }
-
-    console.log('🔑 [Gmail] Tokens récupérés');
-
-    // Vérifier et rafraîchir le token si nécessaire
     let accessToken = settings.gmail_access_token;
     const now = new Date();
     const expiry = settings.gmail_token_expiry ? new Date(settings.gmail_token_expiry) : null;
-
     if (!accessToken || !expiry || expiry <= now) {
-      console.log('🔄 [Gmail] Rafraîchissement du token nécessaire');
-      
-      const clientId = Deno.env.get('GMAIL_CLIENT_ID')!;
-      const clientSecret = Deno.env.get('GMAIL_CLIENT_SECRET')!;
-
-      const tokenData = await refreshAccessToken(
-        settings.gmail_refresh_token,
-        clientId,
-        clientSecret
-      );
-
+      const clientId = Deno.env.get('GMAIL_CLIENT_ID');
+      const clientSecret = Deno.env.get('GMAIL_CLIENT_SECRET');
+      const tokenData = await refreshAccessToken(settings.gmail_refresh_token, clientId, clientSecret);
       accessToken = tokenData.access_token;
       const expiryDate = new Date(now.getTime() + tokenData.expires_in * 1000);
-
-      console.log('✅ [Gmail] Token rafraîchi');
-
-      // Mettre à jour le token en base
-      await supabase
-        .from('user_settings')
-        .update({
-          gmail_access_token: accessToken,
-          gmail_token_expiry: expiryDate.toISOString(),
-        })
-        .eq('user_id', user.id);
-    } else {
-      console.log('✅ [Gmail] Token valide');
+      await supabase.from('user_settings').update({
+        gmail_access_token: accessToken,
+        gmail_token_expiry: expiryDate.toISOString()
+      }).eq('user_id', user.id);
     }
-
-    // Créer le message MIME
-    console.log('📝 [Gmail] Construction du message MIME...');
-    const mimeMessage = createMimeMessage(to, subject, html, attachments);
-    
-    console.log(`📏 [Gmail] Taille du message: ${Math.round(mimeMessage.length / 1024)}KB`);
-
-    // Encoder en base64url
-    console.log('🔐 [Gmail] Encodage base64url...');
-    const encoder = new TextEncoder();
-    const messageBytes = encoder.encode(mimeMessage);
-    const encodedMessage = base64UrlEncode(messageBytes);
-
-    console.log(`📏 [Gmail] Message encodé: ${Math.round(encodedMessage.length / 1024)}KB`);
-
-    // Envoyer via Gmail API
-    console.log('📤 [Gmail] Envoi via Gmail API...');
-    const result = await sendGmailMessage(accessToken, { raw: encodedMessage });
-
-    console.log('✅ [Gmail] Email envoyé avec succès!', result.id);
-
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        messageId: result.id,
-        threadId: result.threadId,
-        message: 'Email envoyé avec succès via Gmail'
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    // Construire MIME
+    const mimeMessage = createMimeMessage({
+      from: from ?? user.email,
+      to,
+      subject,
+      html,
+      attachments,
+      messageIdDomainHint: (from ?? user.email)?.split('@')[1]
+    });
+    // Encoder & envoyer
+    const encoded = base64UrlEncodeBytes(new TextEncoder().encode(mimeMessage));
+    const result = await sendGmailMessage(accessToken, {
+      raw: encoded
+    });
+    return new Response(JSON.stringify({
+      success: true,
+      messageId: result.id,
+      threadId: result.threadId,
+      message: 'Email envoyé avec succès via Gmail'
+    }), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
       }
-    );
-
-  } catch (error: any) {
-    console.error('❌ [Gmail] Erreur:', error);
-    
-    // Messages d'erreur clairs pour l'utilisateur
-    let userMessage = error.message;
-    
-    if (error.message.includes('Unauthorized')) {
+    });
+  } catch (error) {
+    let userMessage = error?.message || 'Erreur inconnue';
+    if (userMessage.includes('Unauthorized')) {
       userMessage = 'Session expirée. Veuillez vous reconnecter.';
-    } else if (error.message.includes('Gmail non connecté')) {
+    } else if (userMessage.includes('Gmail non connecté')) {
       userMessage = 'Gmail non connecté. Allez dans Paramètres > Méthode d\'envoi email > Connecter Gmail.';
-    } else if (error.message.includes('trop volumineuses')) {
-      // Garder le message tel quel (déjà clair)
-    } else if (error.message.includes('Gmail API error')) {
-      userMessage = 'Erreur Gmail API. Vérifiez que votre compte Gmail est bien connecté.';
+    } else if (userMessage.match(/(413|Message too large|larger than)/i)) {
+      userMessage = 'Message trop volumineux. Gmail limite les pièces jointes à ~25 MB au total. Utilisez un lien de téléchargement.';
+    } else if (userMessage.includes('Gmail API error')) {
+      userMessage = 'Erreur Gmail API. Vérifiez la connexion Gmail et les permissions.';
     }
-
-    return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: userMessage,
-        details: error.message 
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({
+      success: false,
+      error: userMessage,
+      details: error?.message
+    }), {
+      status: 500,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
       }
-    );
+    });
   }
 });

@@ -6,6 +6,7 @@ import { useBackgroundProcessing } from '../hooks/useBackgroundProcessing';
 import { UploadQuotaErrorModal } from './UploadQuotaErrorModal';
 import { QuotaFullModal } from './QuotaFullModal';
 import { LowQuotaUploadWarningModal } from './LowQuotaUploadWarningModal';
+import { useDialog } from '../context/DialogContext';
 
 interface AudioUploadProps {
   userId: string;
@@ -26,6 +27,7 @@ export const AudioUpload = ({ userId, onSuccess }: AudioUploadProps) => {
   const [uploadQuotaErrorData, setUploadQuotaErrorData] = useState({ audioDuration: 0, remainingMinutes: 0 });
   const [showLowQuotaUploadWarning, setShowLowQuotaUploadWarning] = useState(false);
   const [lowQuotaUploadData, setLowQuotaUploadData] = useState({ uploadMinutes: 0, remainingAfter: 0 });
+  const { showAlert } = useDialog();
 
   const { addTask, updateTask } = useBackgroundProcessing(userId);
 
@@ -154,7 +156,11 @@ export const AudioUpload = ({ userId, onSuccess }: AudioUploadProps) => {
                       file.name.match(/\.(mp3|wav|m4a|webm|ogg|flac|aac|wma)$/i);
 
       if (!isValid) {
-        alert('Veuillez sélectionner un fichier audio valide (MP3, WAV, M4A, WebM, etc.).');
+        await showAlert({
+          title: 'Fichier non supporté',
+          message: 'Veuillez sélectionner un fichier audio valide (MP3, WAV, M4A, WebM, etc.).',
+          variant: 'warning',
+        });
         return;
       }
       setSelectedFile(file);
@@ -202,7 +208,11 @@ export const AudioUpload = ({ userId, onSuccess }: AudioUploadProps) => {
     if (subscription && subscription.plan_type === 'starter') {
       // Si pas de durée détectée, bloquer pour éviter les abus
       if (finalDuration === 0) {
-        alert('❌ Impossible de détecter la durée du fichier audio.\n\nPour protéger votre quota, nous ne pouvons pas traiter ce fichier. Veuillez essayer avec un autre format (MP3, WAV, M4A recommandés) ou contacter le support.');
+        await showAlert({
+          title: 'Durée inconnue',
+          message: '❌ Impossible de détecter la durée du fichier audio.\n\nPour protéger votre quota, nous ne pouvons pas traiter ce fichier. Veuillez essayer avec un autre format (MP3, WAV, M4A recommandés) ou contacter le support.',
+          variant: 'warning',
+        });
         return;
       }
 
@@ -250,7 +260,11 @@ export const AudioUpload = ({ userId, onSuccess }: AudioUploadProps) => {
     });
 
     if (!taskId) {
-      alert('Erreur lors de la création de la tâche');
+      await showAlert({
+        title: 'Erreur de traitement',
+        message: 'Erreur lors de la création de la tâche',
+        variant: 'danger',
+      });
       setIsProcessing(false);
       return;
     }
@@ -273,17 +287,26 @@ export const AudioUpload = ({ userId, onSuccess }: AudioUploadProps) => {
       console.log('✅ Transcription réussie, durée:', actualDuration, 'secondes');
 
       // 2) Générer le résumé
-      const summaryProgress = 'Génération du résumé IA...';
+      const summaryProgress = 'Génération des résumés court et détaillé...';
       setProgress(summaryProgress);
       await updateTask(taskId, { progress: summaryProgress, progress_percent: 80 });
-      const { title, summary } = await generateSummary(fullTranscript, userId);
+      const [detailedResult, shortResult] = await Promise.all([
+        generateSummary(fullTranscript, userId, 0, 'detailed'),
+        generateSummary(fullTranscript, userId, 0, 'short'),
+      ]);
 
       // 3) Créer la réunion UNIQUEMENT si transcription + résumé ont réussi
       const createProgress = 'Enregistrement de la réunion...';
       setProgress(createProgress);
       await updateTask(taskId, { progress: createProgress, progress_percent: 90 });
       
-      const finalTitle = meetingTitle || title || `Upload du ${new Date().toLocaleDateString('fr-FR')}`;
+      const detailedSummary = detailedResult.summary || '';
+      const shortSummary = shortResult.summary || '';
+      const finalTitle =
+        meetingTitle ||
+        detailedResult.title ||
+        shortResult.title ||
+        `Upload du ${new Date().toLocaleDateString('fr-FR')}`;
       console.log('💾 Création de la réunion avec toutes les données (quota sera débité maintenant)');
 
       const { data: meeting, error: createError } = await supabase
@@ -291,7 +314,11 @@ export const AudioUpload = ({ userId, onSuccess }: AudioUploadProps) => {
         .insert({
           title: finalTitle,
           transcript: fullTranscript,
-          summary,
+          summary: detailedSummary,
+          summary_detailed: detailedSummary,
+          summary_short: shortSummary,
+          summary_mode: 'detailed',
+          summary_regenerated: false,
           duration: actualDuration,
           user_id: userId,
           notes: notes || null,
@@ -338,7 +365,11 @@ export const AudioUpload = ({ userId, onSuccess }: AudioUploadProps) => {
         status: 'error',
         error: error.message || 'Une erreur est survenue'
       });
-      alert(`Erreur: ${error.message || 'Une erreur est survenue'}`);
+      await showAlert({
+        title: 'Erreur',
+        message: `Erreur: ${error.message || 'Une erreur est survenue'}`,
+        variant: 'danger',
+      });
     } finally {
       setIsProcessing(false);
       setProgress('');
