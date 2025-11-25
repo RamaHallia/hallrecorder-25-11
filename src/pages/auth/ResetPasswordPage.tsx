@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock, CheckCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 
 export const ResetPasswordPage = () => {
   const navigate = useNavigate();
@@ -46,12 +47,27 @@ export const ResetPasswordPage = () => {
     try {
       const refreshTokenValue = searchParams.get('refresh_token') || '';
 
-      await supabase.auth.setSession({
+      const tempClient = createClient(
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_ANON_KEY,
+        {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+          },
+        }
+      );
+
+      const { error: sessionError } = await tempClient.auth.setSession({
         access_token: token,
         refresh_token: refreshTokenValue,
       });
 
-      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const { error: updateError } = await tempClient.auth.updateUser({ password });
 
       if (updateError) {
         throw updateError;
