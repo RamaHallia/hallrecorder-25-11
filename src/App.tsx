@@ -467,9 +467,11 @@ function App() {
         // Vérifier si on est en mode récupération de mot de passe
         const hash = window.location.hash;
         const isRecoveryMode = hash.includes('type=recovery');
+        const persistedRecoveryMode = sessionStorage.getItem('password_recovery_mode') === 'true';
 
-        if (isRecoveryMode) {
-          console.log('🔐 Mode récupération détecté dans l\'URL - blocage de la connexion automatique');
+        if (isRecoveryMode || persistedRecoveryMode) {
+          console.log('🔐 Mode récupération détecté - blocage de la connexion automatique');
+          sessionStorage.setItem('password_recovery_mode', 'true');
           setIsPasswordRecoveryMode(true);
           setShowUpdatePasswordModal(true);
           setIsAuthLoading(false);
@@ -498,6 +500,7 @@ function App() {
       // Gérer l'événement PASSWORD_RECOVERY (reset password)
       if (event === 'PASSWORD_RECOVERY') {
         console.log('🔐 PASSWORD_RECOVERY event detected - showing password update modal');
+        sessionStorage.setItem('password_recovery_mode', 'true');
         setIsPasswordRecoveryMode(true);
         setShowUpdatePasswordModal(true);
         setIsAuthLoading(false);
@@ -3070,10 +3073,12 @@ function App() {
           onClose={() => {
             setShowUpdatePasswordModal(false);
             setIsPasswordRecoveryMode(false);
+            sessionStorage.removeItem('password_recovery_mode');
           }}
           onSuccess={async () => {
             setShowUpdatePasswordModal(false);
             setIsPasswordRecoveryMode(false);
+            sessionStorage.removeItem('password_recovery_mode');
 
             // Récupérer la session après le changement de mot de passe
             const { data: { session } } = await supabase.auth.getSession();
