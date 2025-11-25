@@ -464,10 +464,22 @@ function App() {
     // Vérifier la session initiale
     const checkInitialSession = async () => {
       try {
+        // Vérifier si on est en mode récupération de mot de passe
+        const hash = window.location.hash;
+        const isRecoveryMode = hash.includes('type=recovery');
+
+        if (isRecoveryMode) {
+          console.log('🔐 Mode récupération détecté dans l\'URL - blocage de la connexion automatique');
+          setIsPasswordRecoveryMode(true);
+          setShowUpdatePasswordModal(true);
+          setIsAuthLoading(false);
+          return;
+        }
+
         const { data: { session } } = await supabase.auth.getSession();
         console.log('🔍 Session initiale:', !!session?.user);
         setUser(session?.user ?? null);
-        
+
         if (session?.user) {
           loadMeetings();
         }
