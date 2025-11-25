@@ -1,57 +1,38 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Mail, Send, CheckCircle } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { Link, useNavigate } from 'react-router-dom';
+import { Mail, Send } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export const ForgotPasswordPage = () => {
-  const { resetPassword } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
-    const { error } = await resetPassword(email);
+    try {
+      const { data, error } = await supabase.functions.invoke('send-reset-code', {
+        body: { email },
+      });
 
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-    } else {
-      setSuccess(true);
+      if (error) throw error;
+
+      if (data?.error) {
+        setError(data.error);
+        setLoading(false);
+      } else {
+        localStorage.setItem('reset_email', email);
+        navigate('/verify-code');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de l\'envoi du code');
       setLoading(false);
     }
   };
-
-  if (success) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-coral-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <div className="bg-white rounded-3xl shadow-xl p-8 border-2 border-orange-100 text-center">
-            <div className="flex justify-center mb-6">
-              <div className="w-20 h-20 bg-gradient-to-br from-green-100 to-green-200 rounded-full flex items-center justify-center">
-                <CheckCircle className="w-12 h-12 text-green-600" />
-              </div>
-            </div>
-            <h2 className="text-2xl font-bold text-cocoa-900 mb-4">Email envoyé</h2>
-            <p className="text-cocoa-600 mb-6">
-              Nous vous avons envoyé un lien de réinitialisation à <strong>{email}</strong>.
-              Cliquez sur le lien dans l'email pour réinitialiser votre mot de passe.
-            </p>
-            <Link
-              to="/login"
-              className="block w-full px-6 py-3 bg-gradient-to-r from-coral-500 to-coral-600 text-white font-bold rounded-xl hover:from-coral-600 hover:to-coral-700 transition-all shadow-lg shadow-coral-500/30 text-center"
-            >
-              Retour à la connexion
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-coral-50 flex items-center justify-center p-4">
@@ -97,7 +78,7 @@ export const ForgotPasswordPage = () => {
               ) : (
                 <>
                   <Send className="w-5 h-5" />
-                  <span>Envoyer le lien</span>
+                  <span>Envoyer le code</span>
                 </>
               )}
             </button>

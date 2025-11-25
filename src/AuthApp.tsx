@@ -4,7 +4,7 @@ import { PrivateRoute } from './components/auth/PrivateRoute';
 import { LoginPage } from './pages/auth/LoginPage';
 import { SignupPage } from './pages/auth/SignupPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
-import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
+import { VerifyCodePage } from './pages/auth/VerifyCodePage';
 import { AuthCallbackPage } from './pages/auth/AuthCallbackPage';
 import { DashboardPage } from './pages/DashboardPage';
 
@@ -17,7 +17,7 @@ export function AuthApp() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/verify-code" element={<VerifyCodePage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route
             path="/dashboard"
