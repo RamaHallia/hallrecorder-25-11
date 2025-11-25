@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock, CheckCircle } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabase';
 
 export const ResetPasswordPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { updatePassword } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -37,16 +36,36 @@ export const ResetPasswordPage = () => {
       return;
     }
 
-    const { error } = await updatePassword(password);
-
-    if (error) {
-      setError(error.message);
+    const token = searchParams.get('token');
+    if (!token) {
+      setError('Token manquant');
       setLoading(false);
-    } else {
+      return;
+    }
+
+    try {
+      const refreshTokenValue = searchParams.get('refresh_token') || '';
+
+      await supabase.auth.setSession({
+        access_token: token,
+        refresh_token: refreshTokenValue,
+      });
+
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      await supabase.auth.signOut();
+
       setSuccess(true);
       setTimeout(() => {
         navigate('/login');
       }, 3000);
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de la réinitialisation');
+      setLoading(false);
     }
   };
 

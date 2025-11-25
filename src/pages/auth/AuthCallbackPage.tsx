@@ -10,34 +10,33 @@ export const AuthCallbackPage = () => {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const accessToken = hashParams.get('access_token');
-        const refreshToken = hashParams.get('refresh_token');
-        const type = hashParams.get('type');
+        const { data, error } = await supabase.auth.getSessionFromUrl();
 
-        if (!accessToken || !refreshToken) {
-          throw new Error('Tokens manquants dans l\'URL');
+        if (error) {
+          throw error;
         }
 
-        if (type === 'recovery') {
-          console.log('🔐 PASSWORD_RECOVERY détecté - redirection sans connexion');
+        if (data?.event === 'PASSWORD_RECOVERY') {
+          console.log('🔐 PASSWORD_RECOVERY détecté - redirection SANS connexion');
 
-          navigate(`/reset-password?token=${accessToken}`);
+          const accessToken = data.session?.access_token;
+          const refreshToken = data.session?.refresh_token;
+
+          if (!accessToken || !refreshToken) {
+            throw new Error('Tokens de récupération manquants');
+          }
+
+          await supabase.auth.signOut();
+
+          navigate(`/reset-password?token=${accessToken}&refresh_token=${refreshToken}`, { replace: true });
           return;
         }
 
-        const { data, error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-
-        if (error) throw error;
-
-        if (data.session) {
+        if (data?.session) {
           console.log('✅ Session établie - redirection vers dashboard');
           navigate('/dashboard');
         } else {
-          throw new Error('Impossible d\'établir la session');
+          throw new Error('Aucune session trouvée');
         }
       } catch (err: any) {
         console.error('❌ Erreur callback:', err);
