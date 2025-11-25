@@ -184,6 +184,7 @@ function App() {
   const [isDefaultSummaryModeLoaded, setIsDefaultSummaryModeLoaded] = useState(false);
   const [showDefaultModeReminder, setShowDefaultModeReminder] = useState(false);
   const [showUpdatePasswordModal, setShowUpdatePasswordModal] = useState(false);
+  const [isPasswordRecoveryMode, setIsPasswordRecoveryMode] = useState(false);
   const [recordingReminderToast, setRecordingReminderToast] = useState<{ message: string } | null>(null);
   const categoryColorSupportedRef = useRef<boolean | null>(null);
   const [subscription, setSubscription] = useState<{ plan_type: 'starter' | 'unlimited'; is_active: boolean } | null>(null);
@@ -481,17 +482,21 @@ function App() {
 
     const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log('🔐 Auth state change:', event, 'User:', !!session?.user);
-      setUser(session?.user ?? null);
-
-      // Arrêter le chargement si ce n'est pas déjà fait
-      setIsAuthLoading(false);
 
       // Gérer l'événement PASSWORD_RECOVERY (reset password)
       if (event === 'PASSWORD_RECOVERY') {
         console.log('🔐 PASSWORD_RECOVERY event detected - showing password update modal');
+        setIsPasswordRecoveryMode(true);
         setShowUpdatePasswordModal(true);
+        setIsAuthLoading(false);
+        // NE PAS définir user pour bloquer l'accès à l'application
         return;
       }
+
+      setUser(session?.user ?? null);
+
+      // Arrêter le chargement si ce n'est pas déjà fait
+      setIsAuthLoading(false);
 
       // Ne changer la vue que lors de la connexion initiale, pas à chaque changement d'état
       if (session?.user && event === 'SIGNED_IN') {
@@ -511,7 +516,8 @@ function App() {
 
   // Charger les réunions et vérifier l'abonnement quand l'utilisateur change
   useEffect(() => {
-    if (user) {
+    // Ne pas charger les données si on est en mode récupération de mot de passe
+    if (user && !isPasswordRecoveryMode) {
       loadMeetings();
       checkSubscription(user.id);
     } else {
@@ -519,7 +525,7 @@ function App() {
       setSubscription(null);
       setIsSubscriptionLoading(false);
     }
-  }, [user]);
+  }, [user, isPasswordRecoveryMode]);
 
   // Recharger les réunions quand on navigue vers certaines vues
   useEffect(() => {
@@ -3049,9 +3055,22 @@ function App() {
       {/* Modal de mise à jour du mot de passe (PASSWORD_RECOVERY) */}
       {showUpdatePasswordModal && (
         <UpdatePasswordModal
-          onClose={() => setShowUpdatePasswordModal(false)}
+          onClose={() => {
+            setShowUpdatePasswordModal(false);
+            setIsPasswordRecoveryMode(false);
+          }}
           onSuccess={async () => {
             setShowUpdatePasswordModal(false);
+            setIsPasswordRecoveryMode(false);
+
+            // Récupérer la session après le changement de mot de passe
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              setUser(session.user);
+              await loadMeetings();
+              await checkSubscription(session.user.id);
+            }
+
             await showAlert({
               title: 'Succès',
               message: 'Votre mot de passe a été réinitialisé avec succès !',
