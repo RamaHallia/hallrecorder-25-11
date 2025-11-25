@@ -4,9 +4,10 @@ import { supabase } from '../lib/supabase';
 
 interface UpdatePasswordModalProps {
   onSuccess: () => void;
+  onClose?: () => void;
 }
 
-export const UpdatePasswordModal = ({ onSuccess }: UpdatePasswordModalProps) => {
+export const UpdatePasswordModal = ({ onSuccess, onClose }: UpdatePasswordModalProps) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -45,7 +46,7 @@ export const UpdatePasswordModal = ({ onSuccess }: UpdatePasswordModalProps) => 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={(e) => e.target === e.currentTarget && onClose?.()}>
       <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 border-2 border-orange-100">
         <div className="text-center mb-6">
           <div className="flex justify-center mb-4">
