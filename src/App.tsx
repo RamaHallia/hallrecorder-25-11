@@ -469,9 +469,8 @@ function App() {
         const isRecoveryMode = hash.includes('type=recovery');
 
         if (isRecoveryMode) {
-          console.log('🔐 Mode récupération détecté - déconnexion de sécurité');
-          // SÉCURITÉ: Déconnecter immédiatement pour éviter toute session active
-          await supabase.auth.signOut();
+          console.log('🔐 Mode récupération détecté - blocage accès application');
+          // NE PAS définir user = bloque l'accès
           setUser(null);
           setIsPasswordRecoveryMode(true);
           setShowUpdatePasswordModal(true);
@@ -500,14 +499,12 @@ function App() {
 
       // Gérer l'événement PASSWORD_RECOVERY (reset password)
       if (event === 'PASSWORD_RECOVERY') {
-        console.log('🔐 PASSWORD_RECOVERY event detected - déconnexion de sécurité');
-        // SÉCURITÉ: Déconnecter immédiatement
-        supabase.auth.signOut().then(() => {
-          setUser(null);
-          setIsPasswordRecoveryMode(true);
-          setShowUpdatePasswordModal(true);
-          setIsAuthLoading(false);
-        });
+        console.log('🔐 PASSWORD_RECOVERY event detected - blocage accès');
+        // NE PAS définir user = bloque l'accès
+        setUser(null);
+        setIsPasswordRecoveryMode(true);
+        setShowUpdatePasswordModal(true);
+        setIsAuthLoading(false);
         return;
       }
 
