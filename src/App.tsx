@@ -467,11 +467,12 @@ function App() {
         // Vérifier si on est en mode récupération de mot de passe
         const hash = window.location.hash;
         const isRecoveryMode = hash.includes('type=recovery');
-        const persistedRecoveryMode = sessionStorage.getItem('password_recovery_mode') === 'true';
 
-        if (isRecoveryMode || persistedRecoveryMode) {
-          console.log('🔐 Mode récupération détecté - blocage de la connexion automatique');
-          sessionStorage.setItem('password_recovery_mode', 'true');
+        if (isRecoveryMode) {
+          console.log('🔐 Mode récupération détecté - déconnexion de sécurité');
+          // SÉCURITÉ: Déconnecter immédiatement pour éviter toute session active
+          await supabase.auth.signOut();
+          setUser(null);
           setIsPasswordRecoveryMode(true);
           setShowUpdatePasswordModal(true);
           setIsAuthLoading(false);
@@ -499,12 +500,14 @@ function App() {
 
       // Gérer l'événement PASSWORD_RECOVERY (reset password)
       if (event === 'PASSWORD_RECOVERY') {
-        console.log('🔐 PASSWORD_RECOVERY event detected - showing password update modal');
-        sessionStorage.setItem('password_recovery_mode', 'true');
-        setIsPasswordRecoveryMode(true);
-        setShowUpdatePasswordModal(true);
-        setIsAuthLoading(false);
-        // NE PAS définir user pour bloquer l'accès à l'application
+        console.log('🔐 PASSWORD_RECOVERY event detected - déconnexion de sécurité');
+        // SÉCURITÉ: Déconnecter immédiatement
+        supabase.auth.signOut().then(() => {
+          setUser(null);
+          setIsPasswordRecoveryMode(true);
+          setShowUpdatePasswordModal(true);
+          setIsAuthLoading(false);
+        });
         return;
       }
 
