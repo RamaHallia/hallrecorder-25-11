@@ -19,12 +19,21 @@ export const ForgotPasswordModal = ({ onClose }: ForgotPasswordModalProps) => {
     setError('');
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      console.log('🔐 Envoi de l\'email de réinitialisation pour:', email);
+      console.log('🔐 URL de redirection:', window.location.origin);
+
+      const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: window.location.origin,
       });
 
-      if (error) throw error;
+      console.log('🔐 Résultat:', { data, error });
 
+      if (error) {
+        console.error('❌ Erreur lors de l\'envoi:', error);
+        throw error;
+      }
+
+      console.log('✅ Email envoyé avec succès');
       setMessage('Un email de réinitialisation a été envoyé à votre adresse. Veuillez vérifier votre boîte de réception.');
       setEmail('');
 
@@ -33,6 +42,7 @@ export const ForgotPasswordModal = ({ onClose }: ForgotPasswordModalProps) => {
         onClose();
       }, 3000);
     } catch (error: any) {
+      console.error('❌ Erreur complète:', error);
       setError(error.message || 'Une erreur est survenue');
     } finally {
       setLoading(false);
