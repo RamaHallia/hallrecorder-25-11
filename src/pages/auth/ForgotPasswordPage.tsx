@@ -8,11 +8,13 @@ export const ForgotPasswordPage = () => {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [debugCode, setDebugCode] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setDebugCode(null);
 
     try {
       const { data, error } = await supabase.functions.invoke('send-reset-code', {
@@ -25,8 +27,16 @@ export const ForgotPasswordPage = () => {
         setError(data.error);
         setLoading(false);
       } else {
+        if (data?.debug_code) {
+          setDebugCode(data.debug_code);
+        }
         localStorage.setItem('reset_email', email);
-        navigate('/verify-code');
+        if (data?.debug_code) {
+          localStorage.setItem('debug_code', data.debug_code);
+        }
+        setTimeout(() => {
+          navigate('/verify-code');
+        }, 2000);
       }
     } catch (err: any) {
       setError(err.message || 'Erreur lors de l\'envoi du code');
@@ -61,6 +71,14 @@ export const ForgotPasswordPage = () => {
                 />
               </div>
             </div>
+
+            {debugCode && (
+              <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                <p className="text-green-900 font-bold text-center mb-2">Code de vérification (DEV)</p>
+                <p className="text-green-700 text-3xl font-mono text-center tracking-widest">{debugCode}</p>
+                <p className="text-green-600 text-xs text-center mt-2">Redirection automatique dans 2 secondes...</p>
+              </div>
+            )}
 
             {error && (
               <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">

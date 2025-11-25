@@ -20,6 +20,12 @@ export const VerifyCodePage = () => {
       return;
     }
     setEmail(savedEmail);
+
+    const savedCode = localStorage.getItem('debug_code');
+    if (savedCode) {
+      setCode(savedCode);
+      localStorage.removeItem('debug_code');
+    }
   }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
